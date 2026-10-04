@@ -2,7 +2,8 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { DesktopApp } from "./DesktopApp";
 import { createSession } from "./session";
-import { createTauriPlatform, setUpWindow } from "./tauri";
+import { createTauriPlatform, createTauriUpdater, setUpWindow } from "./tauri";
+import { createUpdateController } from "./updates";
 import "./styles.css";
 
 async function start() {
@@ -23,6 +24,7 @@ async function start() {
         platform={platform}
         windowControl={windowControl}
         version={__APP_VERSION__}
+        updates={createUpdateController({ updater: createTauriUpdater() })}
       />
     </StrictMode>
   );

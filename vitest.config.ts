@@ -15,7 +15,7 @@ export default defineConfig({
         resolve: { alias },
         test: {
           name: "node",
-          include: ["server/**/*.test.ts", "shared/**/*.test.ts"],
+          include: ["server/**/*.test.ts", "shared/**/*.test.ts", "scripts/**/*.test.ts"],
           environment: "node",
         },
       },
@@ -31,7 +31,7 @@ export default defineConfig({
     ],
     coverage: {
       provider: "v8",
-      include: ["server/src/**", "shared/**", "web/src/**", "desktop/src/**"],
+      include: ["server/src/**", "shared/**", "web/src/**", "desktop/src/**", "scripts/release/**"],
       exclude: [
         "**/*.test.*",
         "**/test-support/**",
@@ -42,6 +42,8 @@ export default defineConfig({
         "desktop/src/main.tsx",
         // Direct calls into the window toolkit: only a running app can test these.
         "desktop/src/tauri.ts",
+        // Reads files, runs git and fetches URLs; the logic it calls is tested.
+        "scripts/release/cli.ts",
       ],
       // The floor only goes up (standard 004, 4.4.2): raise it when coverage rises.
       thresholds: { lines: 90, functions: 90, branches: 85, statements: 90 },

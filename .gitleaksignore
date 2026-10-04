@@ -1,0 +1,3 @@
+# A test fixture's comment line ("minisign public key: <key id>") that looks like a key to the generic rule.
+# It is a made-up key id for a throwaway test key; the line is gone from the file in the next commit.
+d76dcac7f229d341aabc1b893f482794e79976f3:scripts/release/minisign.test.ts:generic-api-key:10

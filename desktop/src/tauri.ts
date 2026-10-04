@@ -15,9 +15,11 @@ import {
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { check, type Update } from "@tauri-apps/plugin-updater";
 import { COLLAPSED_HEIGHT } from "./DesktopApp";
 import type { DataFile, Platform, WindowControl } from "./platform";
 import type { Settings } from "./persistence";
+import { UpdaterUnavailableError, type Updater } from "./updates";
 import { clampToVisible, type Rect } from "./window-bounds";
 
 export function createTauriPlatform(): Platform {
@@ -28,6 +30,24 @@ export function createTauriPlatform(): Platform {
     readLegacyStore: () => invoke<string | null>("read_legacy_store"),
     fetch: tauriFetch as typeof fetch,
     openUrl: (url) => openUrl(url),
+  };
+}
+
+/** The update plugin is only built in when the app was given an update key (see `updates_enabled` on the Rust side). */
+export function createTauriUpdater(): Updater {
+  let found: Update | null = null;
+  return {
+    async check() {
+      if (!(await invoke<boolean>("updates_enabled"))) throw new UpdaterUnavailableError();
+      found = await check();
+      return found ? { version: found.version, notes: found.body ?? "" } : null;
+    },
+    async install() {
+      if (!found) return;
+      await found.downloadAndInstall();
+      await invoke<void>("restart_app");
+    },
+    installBlocked: () => invoke<boolean>("install_blocked"),
   };
 }
 
@@ -48,6 +68,7 @@ export async function setUpWindow(options: {
   let collapsed = settings.collapsed;
   let expandedHeight = settings.bounds?.height ?? 480;
   const listeners = new Set<(change: { permanentTop?: boolean; autostart?: boolean }) => void>();
+  const updateListeners = new Set<() => void>();
 
   // 1. Restore the position on a screen that still exists.
   if (settings.bounds) {
@@ -127,6 +148,16 @@ export async function setUpWindow(options: {
       await MenuItem.new({ id: "toggle", text: "显示 / 隐藏", action: () => void toggleVisible() }),
       permanentTopItem,
       autostartItem,
+      await MenuItem.new({
+        id: "check-updates",
+        text: "检查更新…",
+        action: async () => {
+          // The answer is shown in the window, so bring it up first.
+          await win.show();
+          await win.setFocus();
+          updateListeners.forEach((listener) => listener());
+        },
+      }),
       await PredefinedMenuItem.new({ item: "Separator" }),
       await MenuItem.new({
         id: "quit",
@@ -178,6 +209,10 @@ export async function setUpWindow(options: {
     onTrayChange(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+    onCheckUpdates(listener) {
+      updateListeners.add(listener);
+      return () => updateListeners.delete(listener);
     },
   };
 }

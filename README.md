@@ -8,7 +8,7 @@
 [![release](https://img.shields.io/github/v/release/MoliDuo/MoliTodo)](https://github.com/MoliDuo/MoliTodo/releases)
 ![license](https://img.shields.io/badge/license-All%20rights%20reserved-lightgrey)
 
-> 重写进行中：目前完成了服务端、统一登录、任务同步和网页版；桌面端代码已就绪；安装包和自动更新按 [docs/architecture.md](docs/architecture.md) 里的步骤陆续加入。旧的 Electron 版（哞哞清单）在 [v1.0.7](https://github.com/MoliDuo/MoliTodo/releases/tag/v1.0.7) 之前的发布里，不再维护。
+> 重写进行中：目前完成了服务端、统一登录、任务同步和网页版；桌面安装包在 [Releases](https://github.com/MoliDuo/MoliTodo/releases) 发布，之后自动更新。旧的 Electron 版（哞哞清单）在 [v1.0.7](https://github.com/MoliDuo/MoliTodo/releases/tag/v1.0.7) 之前的发布里，不再维护。
 
 ## 功能
 
@@ -19,7 +19,14 @@
 
 ## 安装或访问
 
-网页：<https://todo.xiangyu.pro>。桌面安装包发布后在 [Releases](https://github.com/MoliDuo/MoliTodo/releases)。
+网页：<https://todo.xiangyu.pro>。
+
+桌面端：到 [Releases](https://github.com/MoliDuo/MoliTodo/releases) 下载，Windows（x64）用 `MoliTodo_<版本>_windows_x64.exe`，macOS（Apple 芯片）用 `MoliTodo_<版本>_macos_arm64.dmg`；下载后可以用 `SHA256SUMS` 校验。
+
+- **Windows**：运行安装包。没有代码签名，系统弹出「Windows 已保护你的电脑」时，点「更多信息」，再点「仍要运行」。
+- **macOS**：打开 `.dmg`，把 Moli Todo 拖进「应用程序」。没有公证，第一次打开被拦住时，到「系统设置 → 隐私与安全性」点「仍要打开」。
+
+装好后会自动更新：启动后和每小时在后台检查，有新版本才提示；也可以在托盘菜单或设置里点「检查更新…」。更新包都用本应用自己的密钥签名，验证不过就不安装。
 
 ## 登录方式
 

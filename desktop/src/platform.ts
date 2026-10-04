@@ -27,4 +27,6 @@ export interface WindowControl {
   onTrayChange(
     listener: (change: { permanentTop?: boolean; autostart?: boolean }) => void
   ): () => void;
+  /** The tray menu's 「检查更新…」 was chosen (the window is already shown). */
+  onCheckUpdates(listener: () => void): () => void;
 }

@@ -23,6 +23,8 @@
     "autostart:allow-enable",
     "autostart:allow-disable",
     "autostart:allow-is-enabled",
+    "updater:allow-check",
+    "updater:allow-download-and-install",
     {
       "identifier": "http:default",
       "allow": [{ "url": "https://auth.xiangyu.pro/*" }, { "url": "https://todo.xiangyu.pro/*" }]

@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, describe, expect, it } from "vitest";
 import { COLLAPSED_HEIGHT, DesktopApp } from "./DesktopApp";
 import { createSession } from "./session";
+import { createUpdateController, type UpdateOffer, type Updater } from "./updates";
 import { createFakeWindow, createMemoryPlatform, createWorld } from "./test-support";
 
 afterEach(cleanup);
@@ -303,5 +304,98 @@ describe("settings", () => {
     await waitFor(() => expect(session.store.engine.all()).toEqual([]));
     fireEvent.click(screen.getByLabelText("关闭"));
     expect(screen.queryByText("删掉我")).toBeNull();
+  });
+});
+
+describe("updates", () => {
+  const offer: UpdateOffer = { version: "2.1.0", notes: "新增：设置里可以检查更新" };
+
+  async function openWithUpdates(overrides: Partial<Updater> = {}) {
+    const world = createWorld();
+    const platform = createMemoryPlatform(world);
+    const session = await createSession({ platform, sleep });
+    const win = createFakeWindow();
+    const installs: string[] = [];
+    const updater: Updater = {
+      check: async () => offer,
+      install: async () => void installs.push("install"),
+      installBlocked: async () => false,
+      ...overrides,
+    };
+    const updates = createUpdateController({
+      updater,
+      setTimer: () => 0,
+      clearTimer: () => undefined,
+    });
+    render(
+      <DesktopApp session={session} platform={platform} windowControl={win} updates={updates} />
+    );
+    return { updates, win, installs, world };
+  }
+
+  it("offers the new version with its notes, and installs on 「立即更新」", async () => {
+    const { updates, installs } = await openWithUpdates();
+    await act(() => updates.checkNow());
+    const notice = await screen.findByRole("status", { name: "更新提示" });
+    expect(notice.textContent).toContain("新版本 2.1.0 可用");
+    expect(notice.textContent).toContain("新增：设置里可以检查更新");
+    fireEvent.click(within(notice).getByText("立即更新"));
+    await waitFor(() => expect(installs).toEqual(["install"]));
+    expect(screen.getByRole("status", { name: "更新提示" }).textContent).toContain(
+      "正在下载并安装"
+    );
+  });
+
+  it("puts it off with 「稍后」", async () => {
+    const { updates } = await openWithUpdates();
+    await act(() => updates.checkNow());
+    fireEvent.click(await screen.findByText("稍后"));
+    expect(screen.queryByRole("status", { name: "更新提示" })).toBeNull();
+  });
+
+  it("answers 「检查更新…」 in settings, and says so when it is the latest", async () => {
+    const { updates } = await openWithUpdates({ check: async () => null });
+    expect(updates.getState().phase).toBe("idle");
+    fireEvent.click(screen.getByLabelText("设置"));
+    fireEvent.click(screen.getByText("检查更新…"));
+    const notice = await screen.findByRole("status", { name: "更新提示" });
+    expect(notice.textContent).toContain("已是最新版本");
+    fireEvent.click(within(notice).getByText("知道了"));
+    expect(screen.queryByRole("status", { name: "更新提示" })).toBeNull();
+  });
+
+  it("checks when the tray menu's 「检查更新…」 is chosen", async () => {
+    const { win } = await openWithUpdates({ check: async () => null });
+    act(() => win.trayCheckUpdates());
+    expect((await screen.findByRole("status", { name: "更新提示" })).textContent).toContain(
+      "已是最新版本"
+    );
+  });
+
+  it("looks for an update right away when the server says this version is too old", async () => {
+    const world = createWorld();
+    world.server.fail = 426;
+    const platform = createMemoryPlatform(world, signedInFiles);
+    const session = await createSession({ platform, sleep });
+    const updates = createUpdateController({
+      updater: {
+        check: async () => offer,
+        install: async () => undefined,
+        installBlocked: async () => false,
+      },
+      setTimer: () => 0,
+      clearTimer: () => undefined,
+    });
+    render(
+      <DesktopApp
+        session={session}
+        platform={platform}
+        windowControl={createFakeWindow()}
+        updates={updates}
+      />
+    );
+    expect((await screen.findByRole("status", { name: "更新提示" })).textContent).toContain(
+      "2.1.0"
+    );
   });
 });
