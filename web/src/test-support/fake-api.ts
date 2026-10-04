@@ -34,6 +34,8 @@ export function createFakeApi() {
   const api = {
     /** Set to a status to make every request answer it, e.g. 401 or 500; "network" throws. */
     fail: null as number | "network" | null,
+    /** When set, requests without exactly this `Authorization` header answer 401. */
+    requireAuthorization: null as string | null,
     requests: [] as {
       method: string;
       url: string;
@@ -57,6 +59,10 @@ export function createFakeApi() {
         ...(body ? { body } : {}),
         headers: (init?.headers ?? {}) as Record<string, string>,
       });
+      const sent = (init?.headers as Record<string, string> | undefined)?.authorization ?? null;
+      if (api.requireAuthorization !== null && sent !== api.requireAuthorization) {
+        return json(401, { error: { code: "unauthorized", message: "x" } });
+      }
       if (api.fail === "network") throw new TypeError("failed to fetch");
       if (api.fail) return json(api.fail, { error: { code: "x", message: "x" } });
       if (url.pathname === "/api/v1/me") return json(200, ME);

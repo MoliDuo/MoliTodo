@@ -10,6 +10,15 @@ updates:
     groups:
       all:
         patterns: ["*"]
+  - package-ecosystem: cargo
+    directory: /desktop
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      all:
+        patterns: ["*"]
   - package-ecosystem: github-actions
     directory: /
     schedule:

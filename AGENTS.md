@@ -41,14 +41,15 @@ These rules apply to every Moli repository. The full standards live in the priva
 
 Moli Todo (`MoliTodo`, id `todo`) is a to-do list that runs as a website and as a desktop widget (Windows, macOS) and syncs between them. One Fastify server owns the data; clients are offline-first (standard 009, 9.7).
 
-Layout: `server/` (Fastify API, SQLite via Drizzle, sign-in), `web/` (Vite + React site, also the desktop UI), `shared/` (Zod schemas and logic used by both), `desktop/` (Tauri 2, added later), `docs/` (Chinese docs; `docs/design/original` is the old Electron app's design mock-up, kept for visual reference only).
+Layout: `server/` (Fastify API, SQLite via Drizzle, sign-in), `web/` (Vite + React site, also the desktop UI), `shared/` (Zod schemas and logic used by both), `desktop/` (Tauri 2: `src-tauri/` Rust shell, `core/` Rust file library, `src/` UI and logic behind `Platform`/`WindowControl` interfaces), `docs/` (Chinese docs; `docs/design/original` is the old Electron app's design mock-up, kept for visual reference only).
 
 ## Run and test
 
 - Install: `npm ci`
 - Run the server: `npm run dev:server` (needs the variables in `.env.example`; copy to `.env.local` — never commit it)
 - Run the web UI: `npm run dev:web`
-- Check (same as CI): `npm run check`
+- Run the desktop app: `npm run tauri dev` (needs Rust and the system WebView libraries; not available on the dev server — CI compiles it on Windows and macOS)
+- Check (same as CI): `npm run check`; Rust: `cd desktop && cargo test -p moli-todo-core`
 
 ## Sign-in
 
