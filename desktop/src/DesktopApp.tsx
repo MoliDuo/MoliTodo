@@ -4,11 +4,11 @@ import { Settings } from "@web/components/Settings";
 import { SyncBadge } from "@web/components/SyncBadge";
 import { TodoBody } from "@web/components/TodoBody";
 import { useAutoSync } from "@web/useAutoSync";
-import { REFRESH_MS } from "./config";
+import { DOWNLOAD_URL, REFRESH_MS } from "./config";
 import { LoginDialog } from "./Login";
 import type { Platform, WindowControl } from "./platform";
 import type { Session } from "./session";
-import type { UpdateController } from "./updates";
+import { isLocked, type UpdateController, type UpdateState } from "./updates";
 
 /** Height of the title bar: what is left of the window when it is collapsed. */
 export const COLLAPSED_HEIGHT = 44;
@@ -78,46 +78,89 @@ function Toggle(props: { label: string; checked: boolean; onChange: (on: boolean
   );
 }
 
-/** The one notice about updates: a new version, progress, or the answer to 「检查更新…」 (standard 007, 7.4.4). */
-function UpdateNotice({ updates }: { updates: UpdateController }) {
-  const state = useSyncExternalStore(updates.subscribe, updates.getState);
-  if (state.phase === "idle") return null;
+/** The answer to 「检查更新…」 (standard 007, 7.4.4). */
+function UpdateMessage({ state, updates }: { state: UpdateState; updates: UpdateController }) {
+  if (state.phase !== "message") return null;
   return (
     <div
       role="status"
       aria-label="更新提示"
-      className="bg-surface-2 flex flex-col gap-1 rounded-lg px-3 py-2 text-sm"
+      className="bg-surface-2 flex items-center gap-2 rounded-lg px-3 py-2 text-sm"
     >
-      {state.phase === "available" && (
-        <>
-          <span>新版本 {state.offer.version} 可用</span>
-          {state.offer.notes && (
-            <span className="text-muted line-clamp-3 text-xs whitespace-pre-line">
-              {state.offer.notes}
-            </span>
-          )}
-          <span className="flex gap-3">
-            <button type="button" className="text-accent" onClick={() => void updates.install()}>
-              立即更新
-            </button>
-            <button type="button" className="text-muted" onClick={() => updates.dismiss()}>
-              稍后
-            </button>
-          </span>
-        </>
-      )}
-      {state.phase === "installing" && <span>正在下载并安装 {state.offer.version}…</span>}
-      {state.phase === "message" && (
-        <span className="flex items-center gap-2">
-          <span className="flex-1">{state.text}</span>
-          <button type="button" className="text-muted" onClick={() => updates.dismiss()}>
-            知道了
-          </button>
-        </span>
-      )}
+      <span className="flex-1">{state.text}</span>
+      <button type="button" className="text-muted" onClick={() => updates.dismiss()}>
+        知道了
+      </button>
     </div>
   );
 }
+
+/** Takes the place of the list while this version has to be updated: there is no 「稍后」. */
+function UpdateGate(props: {
+  state: Extract<UpdateState, { phase: "required" | "installing" | "outdated" }>;
+  updates: UpdateController;
+  onDownload: () => void;
+}) {
+  const { state, updates } = props;
+  const error = state.phase === "installing" ? undefined : state.error;
+  return (
+    <main
+      role="status"
+      aria-label="需要更新"
+      className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3 text-sm"
+    >
+      {state.phase === "outdated" ? (
+        <p className="font-medium">这个版本已不再支持，请更新后继续使用。</p>
+      ) : (
+        <>
+          <p className="font-medium">需要更新到 {state.offer.version} 才能继续使用。</p>
+          {state.offer.notes && (
+            <p className="text-muted text-xs whitespace-pre-line">{state.offer.notes}</p>
+          )}
+        </>
+      )}
+      <p className="text-muted text-xs">这台电脑上的任务都还在，更新后会接着同步。</p>
+      {error && (
+        <p role="alert" className="text-danger">
+          {error}
+        </p>
+      )}
+      {state.phase === "installing" && (
+        <p>正在下载并安装 {state.offer.version}…完成后会自动重启。</p>
+      )}
+      {state.phase === "required" && (
+        <button
+          type="button"
+          className="bg-accent text-accent-fg self-start rounded-lg px-3 py-1.5"
+          onClick={() => void updates.install()}
+        >
+          立即更新
+        </button>
+      )}
+      {state.phase === "outdated" && (
+        <span className="flex gap-3">
+          <button
+            type="button"
+            className="bg-accent text-accent-fg rounded-lg px-3 py-1.5"
+            onClick={props.onDownload}
+          >
+            打开下载页
+          </button>
+          <button
+            type="button"
+            className="text-accent"
+            onClick={() => void updates.checkNow({ manual: true })}
+          >
+            重新检查
+          </button>
+        </span>
+      )}
+    </main>
+  );
+}
+
+const IDLE: UpdateState = { phase: "idle" };
+const NO_UPDATES = { subscribe: () => () => undefined, getState: () => IDLE };
 
 export interface DesktopAppProps {
   session: Session;
@@ -148,6 +191,11 @@ export function DesktopApp({
   const [, refreshAccount] = useState(0);
   const status = engine.getStatus();
   const signedIn = session.tokens.signedIn;
+  const updateState = useSyncExternalStore(
+    (updates ?? NO_UPDATES).subscribe,
+    (updates ?? NO_UPDATES).getState
+  );
+  const locked = isLocked(updateState);
 
   useEffect(() => {
     if (!updates) return;
@@ -161,10 +209,24 @@ export function DesktopApp({
     };
   }, [updates, windowControl]);
 
-  // The server turned this version away: look for the update right away instead of waiting for the hour.
+  // The server turned this version away: look for the update right away and lock the app.
   useEffect(() => {
-    if (status === "upgrade") void updates?.checkNow({ ignoreDismissed: true });
+    if (status === "upgrade") void updates?.serverRejected();
   }, [status, updates]);
+
+  // A required update has to be seen: open the window up and close what covers it. The saved choice to
+  // keep the window collapsed stays as it was.
+  useEffect(() => {
+    if (!locked) return;
+    setSettingsOpen(false);
+    setLoginOpen(false);
+    if (!collapsed) return;
+    setCollapsed(false);
+    void windowControl.setCollapsed(
+      false,
+      session.settings().bounds?.height ?? DEFAULT_EXPANDED_HEIGHT
+    );
+  }, [locked, collapsed, windowControl, session]);
 
   useEffect(() => {
     void windowControl.isAutostart().then(setAutostart, () => undefined);
@@ -213,29 +275,33 @@ export function DesktopApp({
         className="border-border flex shrink-0 items-center gap-2 border-b px-3"
         style={{ height: COLLAPSED_HEIGHT }}
       >
-        <button
-          type="button"
-          onClick={toggleCollapsed}
-          aria-label={collapsed ? "展开" : "折叠"}
-          className="text-muted hover:text-text"
-        >
-          {collapsed ? (
-            <ChevronDown size={16} aria-hidden="true" />
-          ) : (
-            <ChevronUp size={16} aria-hidden="true" />
-          )}
-        </button>
+        {!locked && (
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            aria-label={collapsed ? "展开" : "折叠"}
+            className="text-muted hover:text-text"
+          >
+            {collapsed ? (
+              <ChevronDown size={16} aria-hidden="true" />
+            ) : (
+              <ChevronUp size={16} aria-hidden="true" />
+            )}
+          </button>
+        )}
         <h1 data-tauri-drag-region className="flex-1 text-sm font-semibold">
           Moli Todo
         </h1>
-        <button
-          type="button"
-          onClick={() => setSettingsOpen(true)}
-          aria-label="设置"
-          className="text-muted hover:text-text"
-        >
-          <SettingsIcon size={16} aria-hidden="true" />
-        </button>
+        {!locked && (
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            aria-label="设置"
+            className="text-muted hover:text-text"
+          >
+            <SettingsIcon size={16} aria-hidden="true" />
+          </button>
+        )}
         <button
           type="button"
           onClick={() => {
@@ -248,7 +314,15 @@ export function DesktopApp({
         </button>
       </header>
 
-      {!collapsed && (
+      {!collapsed && locked && updates && (
+        <UpdateGate
+          state={updateState}
+          updates={updates}
+          onDownload={() => void platform.openUrl(DOWNLOAD_URL)}
+        />
+      )}
+
+      {!collapsed && !locked && (
         <>
           <main className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
             {needsLogin && (
@@ -267,7 +341,7 @@ export function DesktopApp({
                 </button>
               </div>
             )}
-            {updates && !settingsOpen && <UpdateNotice updates={updates} />}
+            {updates && !settingsOpen && <UpdateMessage state={updateState} updates={updates} />}
             <TodoBody engine={engine} now={now()} />
           </main>
           <footer className="border-border shrink-0 border-t px-3 py-1">
@@ -299,7 +373,7 @@ export function DesktopApp({
             }}
             onChanged={() => refreshAccount((n) => n + 1)}
           />
-          {updates && <UpdateNotice updates={updates} />}
+          {updates && <UpdateMessage state={updateState} updates={updates} />}
           {updates && (
             <button
               type="button"

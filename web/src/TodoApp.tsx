@@ -12,6 +12,26 @@ const REFRESH_MS = 60_000;
 
 const goToSignIn = () => window.location.assign(signInUrl(window.location));
 
+const RELOADED_AT_KEY = "moli-todo:reloaded-for-upgrade";
+/** At most one automatic reload in this long, so a server set wrong cannot make the page reload forever. */
+const UPGRADE_RELOAD_GAP_MS = 5 * 60 * 1000;
+
+/**
+ * The server says this page is too old (426): load the current one. Inside the gap after the last automatic
+ * reload, the badge asks the person to reload instead.
+ */
+const reloadForUpgrade = () => {
+  try {
+    const last = Number(window.sessionStorage.getItem(RELOADED_AT_KEY));
+    if (last && Date.now() - last < UPGRADE_RELOAD_GAP_MS) return;
+    window.sessionStorage.setItem(RELOADED_AT_KEY, String(Date.now()));
+  } catch {
+    // No storage, so no way to stop a loop: leave it to the badge.
+    return;
+  }
+  window.location.reload();
+};
+
 export function TodoApp({
   store,
   me,
@@ -22,7 +42,11 @@ export function TodoApp({
   now?: () => number;
 }) {
   const { engine } = store;
-  useAutoSync(store, { refreshMs: REFRESH_MS, onAuthLost: goToSignIn });
+  useAutoSync(store, {
+    refreshMs: REFRESH_MS,
+    onAuthLost: goToSignIn,
+    onUpgradeRequired: reloadForUpgrade,
+  });
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   return (

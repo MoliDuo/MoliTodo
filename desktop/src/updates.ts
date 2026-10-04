@@ -1,6 +1,8 @@
-// Update checks (standard 007, 7.4): quiet when there is nothing, one prompt when there is, never
-// forced, and a failed update leaves the running version alone. The actual download and install is
-// behind the `Updater` interface, so this logic is tested without the update plugin.
+// Update checks. This app departs from standard 007, 7.4 ("never forced"): while the interface is still
+// changing fast, an old app can break against the current server, so a newer version has to be installed
+// before the app can be used again. Quiet when there is nothing or the feed cannot be reached (an offline
+// app keeps working), and a failed update leaves the running version alone. The actual download and
+// install is behind the `Updater` interface, so this logic is tested without the update plugin.
 
 export interface UpdateOffer {
   version: string;
@@ -21,29 +23,39 @@ export interface Updater {
 
 export type UpdateState =
   | { phase: "idle" }
-  | { phase: "available"; offer: UpdateOffer }
+  /** A newer version is out: the app is locked until it is installed. `error` says why the last try did not finish. */
+  | { phase: "required"; offer: UpdateOffer; error?: string }
   | { phase: "installing"; offer: UpdateOffer }
-  /** A result the person asked for or an install that did not work; shown until dismissed. */
+  /** The server turned this version away (426) and the feed had nothing to install; locked as well. */
+  | { phase: "outdated"; error?: string }
+  /** The answer to a check the person asked for; shown until dismissed. */
   | { phase: "message"; text: string };
 
-export const FIRST_CHECK_DELAY_MS = 10_000;
+/** The states in which the app cannot be used until it is updated. */
+export function isLocked(
+  state: UpdateState
+): state is Extract<UpdateState, { phase: "required" | "installing" | "outdated" }> {
+  return state.phase === "required" || state.phase === "installing" || state.phase === "outdated";
+}
+
+export const FIRST_CHECK_DELAY_MS = 0;
 export const CHECK_INTERVAL_MS = 60 * 60 * 1000;
 
 export interface CheckOptions {
   /** The person asked: report "up to date" and failures. Background checks stay silent. */
   manual?: boolean;
-  /** Offer a version the person already put off (the server says this version is too old). */
-  ignoreDismissed?: boolean;
 }
 
 export interface UpdateController {
   getState(): UpdateState;
   subscribe(listener: () => void): () => void;
-  /** First check after about 10 seconds, then every hour. */
+  /** First check right away, then every hour. */
   start(): void;
   stop(): void;
   checkNow(options?: CheckOptions): Promise<void>;
-  /** "稍后": no more prompts for this version until the app is started again. */
+  /** The server says this version is too old: look for the update now, and lock the app either way. */
+  serverRejected(): Promise<void>;
+  /** Closes a message; a required update cannot be put off. */
   dismiss(): void;
   install(): Promise<void>;
 }
@@ -59,10 +71,11 @@ export function createUpdateController(options: {
     options.clearTimer ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
   const listeners = new Set<() => void>();
   let state: UpdateState = { phase: "idle" };
-  let dismissed: string | null = null;
   let timer: unknown = null;
   let running = false;
   let checking = false;
+  /** The server answered 426 at least once in this run. */
+  let rejected = false;
 
   const set = (next: UpdateState) => {
     state = next;
@@ -75,6 +88,12 @@ export function createUpdateController(options: {
         if (running) schedule(CHECK_INTERVAL_MS);
       });
     }, ms);
+  };
+
+  /** Nothing to install: locked when the server refused this version, otherwise only a manual check hears about it. */
+  const nothingToInstall = (manual: boolean, text: string) => {
+    if (rejected) set(manual ? { phase: "outdated", error: text } : { phase: "outdated" });
+    else if (manual) set({ phase: "message", text });
   };
 
   const controller: UpdateController = {
@@ -93,42 +112,51 @@ export function createUpdateController(options: {
       if (timer !== null) clearTimer(timer);
       timer = null;
     },
-    async checkNow({ manual = false, ignoreDismissed = false } = {}) {
-      // One prompt or install at a time; a second check meanwhile says nothing new.
+    async checkNow({ manual = false } = {}) {
+      // One check or install at a time; a second check meanwhile says nothing new.
       if (checking || state.phase === "installing") return;
       checking = true;
       try {
         const offer = await updater.check();
         if (offer === null) {
-          if (manual) set({ phase: "message", text: "已是最新版本。" });
+          // The release was withdrawn after it was offered: there is nothing to install any more.
+          if (state.phase === "required") set({ phase: "idle" });
+          nothingToInstall(
+            manual,
+            rejected ? "还没有可安装的新版本，请稍后再试。" : "已是最新版本。"
+          );
           return;
         }
-        if (!manual && !ignoreDismissed && dismissed === offer.version) return;
         // A prompt that is already up for this version stays as it is.
-        if (state.phase === "available" && state.offer.version === offer.version) return;
-        set({ phase: "available", offer });
+        if (state.phase === "required" && state.offer.version === offer.version) return;
+        set({ phase: "required", offer });
       } catch (error) {
         if (error instanceof UpdaterUnavailableError) {
           // Nothing to schedule: this build can never update.
           controller.stop();
-          if (manual) set({ phase: "message", text: "这个版本没有内置更新功能。" });
+          nothingToInstall(manual, "这个版本没有内置更新功能。");
           return;
         }
         // Offline is not an error for an app that works offline (7.4.6a): only a manual check says so.
-        if (manual) set({ phase: "message", text: "现在连不上更新源，请稍后再试。" });
+        nothingToInstall(manual, "现在连不上更新源，请稍后再试。");
       } finally {
         checking = false;
       }
     },
+    async serverRejected() {
+      if (isLocked(state)) return;
+      rejected = true;
+      // A check already under way locks the app when it finds nothing, because `rejected` is read when it ends.
+      await controller.checkNow();
+    },
     dismiss() {
-      if (state.phase === "available") dismissed = state.offer.version;
-      set({ phase: "idle" });
+      if (state.phase === "message") set({ phase: "idle" });
     },
     async install() {
-      if (state.phase !== "available") return;
+      if (state.phase !== "required") return;
       const offer = state.offer;
       if (await updater.installBlocked()) {
-        set({ phase: "message", text: "请先把应用移到「应用程序」文件夹，再更新。" });
+        set({ phase: "required", offer, error: "请先把应用移到「应用程序」文件夹，再更新。" });
         return;
       }
       set({ phase: "installing", offer });
@@ -136,8 +164,8 @@ export function createUpdateController(options: {
         await updater.install();
         // Normally the app restarts and never gets here.
       } catch {
-        // The running version is untouched (7.4.6); the next hourly check tries again.
-        set({ phase: "message", text: "更新没有完成，当前版本不受影响，稍后会再试。" });
+        // The running version is untouched (7.4.6), but it stays locked until the update goes in.
+        set({ phase: "required", offer, error: "更新没有完成，请重试。" });
       }
     },
   };

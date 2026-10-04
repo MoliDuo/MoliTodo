@@ -37,6 +37,9 @@ describe("createSession", () => {
     await signIn(session);
     expect(session.tokens.signedIn).toBe(true);
     expect(session.settings().account).toEqual({ username: "alice", name: "Alice" });
+    // The account lookup says which version asks, too, so an app that is too old hears so (426).
+    const me = world.server.requests.find((r) => r.url === "/api/v1/me");
+    expect(me?.headers["x-moli-client"]).toMatch(/^todo-desktop\//);
     expect(JSON.parse(platform.files["settings.json"] ?? "{}").refreshToken).toBe("refresh-1");
     world.server.requireAuthorization = `Bearer ${await session.tokens.idTokenForRequest()}`;
     expect((await session.store.engine.sync()).status).toBe("idle");

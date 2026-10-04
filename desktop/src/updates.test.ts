@@ -3,6 +3,7 @@ import {
   CHECK_INTERVAL_MS,
   createUpdateController,
   FIRST_CHECK_DELAY_MS,
+  isLocked,
   UpdaterUnavailableError,
   type UpdateOffer,
   type Updater,
@@ -41,12 +42,13 @@ function setup(overrides: Partial<Updater> = {}) {
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("schedule", () => {
-  it("checks after about 10 seconds, then every hour, until stopped", async () => {
+  it("checks right away, then every hour, until stopped", async () => {
     const { controller, calls, timers } = setup();
     controller.start();
     controller.start();
     expect(timers).toHaveLength(1);
     expect(timers[0]?.ms).toBe(FIRST_CHECK_DELAY_MS);
+    expect(FIRST_CHECK_DELAY_MS).toBe(0);
     timers[0]?.run();
     await settle();
     expect(calls.check).toBe(1);
@@ -81,32 +83,33 @@ describe("checking", () => {
     expect(controller.getState()).toEqual({ phase: "message", text: "已是最新版本。" });
   });
 
-  it("offers a newer version and notifies listeners", async () => {
+  it("requires a newer version and notifies listeners", async () => {
     const { controller } = setup();
     let notified = 0;
     const stop = controller.subscribe(() => (notified += 1));
     await controller.checkNow();
-    expect(controller.getState()).toEqual({ phase: "available", offer });
+    expect(controller.getState()).toEqual({ phase: "required", offer });
+    expect(isLocked(controller.getState())).toBe(true);
     expect(notified).toBe(1);
     await controller.checkNow();
     expect(notified).toBe(1);
     stop();
-    controller.dismiss();
-    expect(notified).toBe(1);
   });
 
-  it("does not ask again about a version the person put off, except when asked or when sync needs it", async () => {
+  it("cannot be put off", async () => {
     const { controller } = setup();
     await controller.checkNow();
     controller.dismiss();
-    expect(controller.getState()).toEqual({ phase: "idle" });
+    expect(controller.getState()).toEqual({ phase: "required", offer });
+  });
+
+  it("unlocks when the release it asked for is withdrawn", async () => {
+    let next: UpdateOffer | null = offer;
+    const { controller } = setup({ check: async () => next });
+    await controller.checkNow();
+    next = null;
     await controller.checkNow();
     expect(controller.getState()).toEqual({ phase: "idle" });
-    await controller.checkNow({ ignoreDismissed: true });
-    expect(controller.getState().phase).toBe("available");
-    controller.dismiss();
-    await controller.checkNow({ manual: true });
-    expect(controller.getState().phase).toBe("available");
   });
 
   it("stays quiet when the feed cannot be reached, but a manual check says so", async () => {
@@ -150,6 +153,60 @@ describe("checking", () => {
   });
 });
 
+describe("when the server turns this version away", () => {
+  it("requires the update the feed has", async () => {
+    const { controller } = setup();
+    await controller.serverRejected();
+    expect(controller.getState()).toEqual({ phase: "required", offer });
+    await controller.serverRejected();
+    expect(controller.getState()).toEqual({ phase: "required", offer });
+  });
+
+  it("locks the app when the feed has nothing, cannot be reached, or this build cannot update", async () => {
+    const failures: (() => Promise<UpdateOffer | null>)[] = [
+      async () => null,
+      async () => {
+        throw new Error("offline");
+      },
+      async () => {
+        throw new UpdaterUnavailableError();
+      },
+    ];
+    for (const check of failures) {
+      const { controller } = setup({ check });
+      await controller.serverRejected();
+      expect(controller.getState()).toEqual({ phase: "outdated" });
+      expect(isLocked(controller.getState())).toBe(true);
+    }
+  });
+
+  it("says why a manual check from the locked screen found nothing, and offers the update once there is one", async () => {
+    let next: UpdateOffer | null = null;
+    const { controller } = setup({ check: async () => next });
+    await controller.serverRejected();
+    await controller.checkNow({ manual: true });
+    expect(controller.getState()).toEqual({
+      phase: "outdated",
+      error: "还没有可安装的新版本，请稍后再试。",
+    });
+    next = offer;
+    await controller.checkNow({ manual: true });
+    expect(controller.getState()).toEqual({ phase: "required", offer });
+  });
+
+  it("locks when a check already under way finds nothing", async () => {
+    let release: (value: UpdateOffer | null) => void = () => undefined;
+    const { controller } = setup({
+      check: () => new Promise((resolve) => (release = resolve)),
+    });
+    const first = controller.checkNow();
+    await controller.serverRejected();
+    release(null);
+    await first;
+    expect(controller.getState()).toEqual({ phase: "outdated" });
+  });
+});
+
 describe("installing", () => {
   it("does nothing without an offer", async () => {
     const { controller, calls } = setup();
@@ -176,12 +233,13 @@ describe("installing", () => {
     await controller.install();
     expect(calls.install).toBe(0);
     expect(controller.getState()).toEqual({
-      phase: "message",
-      text: "请先把应用移到「应用程序」文件夹，再更新。",
+      phase: "required",
+      offer,
+      error: "请先把应用移到「应用程序」文件夹，再更新。",
     });
   });
 
-  it("keeps the running version when the install fails", async () => {
+  it("keeps the running version, still locked, when the install fails", async () => {
     const { controller } = setup({
       install: async () => {
         throw new Error("signature mismatch");
@@ -190,10 +248,15 @@ describe("installing", () => {
     await controller.checkNow();
     await controller.install();
     expect(controller.getState()).toEqual({
-      phase: "message",
-      text: "更新没有完成，当前版本不受影响，稍后会再试。",
+      phase: "required",
+      offer,
+      error: "更新没有完成，请重试。",
     });
     await controller.checkNow();
-    expect(controller.getState().phase).toBe("available");
+    expect(controller.getState()).toEqual({
+      phase: "required",
+      offer,
+      error: "更新没有完成，请重试。",
+    });
   });
 });
