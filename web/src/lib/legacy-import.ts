@@ -3,7 +3,7 @@
 // edited or deleted after the first import are therefore never overwritten or brought back.
 
 import { positionAfter } from "./position";
-import { MAX_DURATION_MINUTES, MAX_TEXT_LENGTH, type TaskContent } from "./tasks";
+import { MAX_DURATION_MINUTES, MAX_TEXT_LENGTH, type TaskContent } from "@shared/tasks";
 
 export interface ImportPlan {
   /** Tasks to add, in the order of the old list. */

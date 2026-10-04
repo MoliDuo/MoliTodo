@@ -37,7 +37,7 @@ npm run dev:web              # 网页，端口 5173，接口转发到服务端
 npm run check                # 和 CI 一样的检查：格式、lint、类型、测试（含覆盖率下限）、构建
 ```
 
-目录：`server/`（Fastify 接口和登录）、`web/`（Vite + React 网页）、`shared/`（服务端和网页共用的结构和逻辑）、`docs/`（文档；`docs/design/original` 是旧版的设计稿，仅供视觉参考）。
+目录：`server/`（Fastify 接口和登录）、`web/`（Vite + React 网页）、`shared/`（服务端和网页共用的接口结构；同步等只有网页用的逻辑在 `web/src/lib/`）、`docs/`（文档；`docs/design/original` 是旧版的设计稿，仅供视觉参考）。
 
 ## 许可
 

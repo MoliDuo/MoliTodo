@@ -13,6 +13,6 @@ export const meResponseSchema = z.object({
   name: z.string().nullable(),
   email: z.string().nullable(),
   /** How the request was authenticated: always the browser cookie session. */
-  via: z.enum(["session", "bearer"]),
+  via: z.literal("session"),
 });
 export type MeResponse = z.infer<typeof meResponseSchema>;

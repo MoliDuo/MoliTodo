@@ -1,5 +1,5 @@
-import { createHttpTransport } from "@shared/http-transport";
-import { SyncEngine, type Transport } from "@shared/sync";
+import { createHttpTransport } from "./lib/http-transport";
+import { SyncEngine, type Transport } from "./lib/sync";
 
 export const WEB_CLIENT = `todo-web/${__APP_VERSION__}`;
 

@@ -1,7 +1,7 @@
 import { X } from "lucide-react";
 import { useState } from "react";
-import { parseLegacyStore, planLegacyImport } from "@shared/legacy-import";
-import type { SyncEngine } from "@shared/sync";
+import { parseLegacyStore, planLegacyImport } from "../lib/legacy-import";
+import type { SyncEngine } from "../lib/sync";
 
 export async function importLegacyFile(engine: SyncEngine, text: string): Promise<string> {
   const old = parseLegacyStore(text);

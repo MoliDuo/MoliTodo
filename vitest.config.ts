@@ -15,7 +15,7 @@ export default defineConfig({
         resolve: { alias },
         test: {
           name: "node",
-          include: ["server/**/*.test.ts", "shared/**/*.test.ts", "scripts/**/*.test.ts"],
+          include: ["server/**/*.test.ts", "shared/**/*.test.ts"],
           environment: "node",
         },
       },

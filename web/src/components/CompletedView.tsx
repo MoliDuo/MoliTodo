@@ -1,6 +1,6 @@
 import { Trash2 } from "lucide-react";
 import { useState } from "react";
-import type { SyncEngine, ViewTask } from "@shared/sync";
+import type { SyncEngine, ViewTask } from "../lib/sync";
 import {
   formatClock,
   formatDayLabel,
@@ -10,7 +10,7 @@ import {
   parseDateInputValue,
   parseDuration,
   toDateInputValue,
-} from "@shared/time";
+} from "../lib/time";
 import { isCommitKey } from "./TaskList";
 
 function DurationField({ task, onSave }: { task: ViewTask; onSave: (minutes: number) => void }) {

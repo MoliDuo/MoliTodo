@@ -1,6 +1,6 @@
 import { CloudOff, RefreshCw } from "lucide-react";
-import { formatClock } from "@shared/time";
-import type { SyncStatus } from "@shared/sync";
+import { formatClock } from "../lib/time";
+import type { SyncStatus } from "../lib/sync";
 
 export function syncText(status: SyncStatus, lastSyncAt: number | null): string {
   if (status === "syncing") return "同步中…";

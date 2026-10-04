@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createHttpTransport } from "./http-transport";
 import { emptyState, SyncEngine, SyncError, type PutResult, type Transport } from "./sync";
-import type { ChangesResponse, PutTaskBody, Task } from "./tasks";
+import type { ChangesResponse, PutTaskBody, Task } from "@shared/tasks";
 
 /** A server in memory with the same rules as the real one: versions, a change counter, 409 on stale base. */
 const plain = ({
@@ -424,9 +424,7 @@ describe("createHttpTransport", () => {
   ) {
     const calls: { url: string; init: RequestInit }[] = [];
     const transport = createHttpTransport({
-      baseUrl: "https://todo.example.com",
       client: "todo-web/2.0.0",
-      headers: () => ({ authorization: "Bearer abc" }),
       fetch: async (input, init) => {
         calls.push({ url: String(input), init: init ?? {} });
         return handler(String(input), init ?? {});
@@ -435,15 +433,14 @@ describe("createHttpTransport", () => {
     return { transport, calls };
   }
 
-  it("sends the client version and headers, and reads ok and conflict answers", async () => {
+  it("sends the client version, and reads ok and conflict answers", async () => {
     const ok = transportWith(() => json(200, { task }));
     expect(await ok.transport.put(task.id, body)).toEqual({ kind: "ok", task });
     const call = ok.calls[0];
-    expect(call?.url).toBe("https://todo.example.com/api/v1/tasks/t-0000001");
+    expect(call?.url).toBe("/api/v1/tasks/t-0000001");
     expect(call?.init.method).toBe("PUT");
     expect(call?.init.headers).toMatchObject({
       "x-moli-client": "todo-web/2.0.0",
-      authorization: "Bearer abc",
       "content-type": "application/json",
     });
 
@@ -460,9 +457,7 @@ describe("createHttpTransport", () => {
   it("reads changes", async () => {
     const t = transportWith(() => json(200, { tasks: [task], cursor: 4, hasMore: false }));
     expect(await t.transport.changes(3, 200)).toEqual({ tasks: [task], cursor: 4, hasMore: false });
-    expect(t.calls[0]?.url).toBe(
-      "https://todo.example.com/api/v1/tasks/changes?cursor=3&limit=200"
-    );
+    expect(t.calls[0]?.url).toBe("/api/v1/tasks/changes?cursor=3&limit=200");
   });
 
   it.each([
