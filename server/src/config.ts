@@ -16,6 +16,15 @@ const envSchema = z.object({
   HOST: z.string().default("0.0.0.0"),
   APP_VERSION: z.string().min(1).default("dev"),
   SESSION_DAYS: z.coerce.number().int().min(1).max(365).default(30),
+  /**
+   * Oldest client version still served, as `X.Y.Z`. Clients that report an older one in `X-Moli-Client` get 426.
+   * Empty means no limit.
+   */
+  MIN_CLIENT_VERSION: z
+    .string()
+    .regex(/^\d+\.\d+\.\d+$/)
+    .optional()
+    .or(z.literal("").transform(() => undefined)),
   /** Directory of the built web UI. */
   WEB_DIST: z.string().default("./dist/web"),
 });
