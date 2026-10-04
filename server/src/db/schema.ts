@@ -30,26 +30,25 @@ export const oidcLogins = sqliteTable("oidc_logins", {
 });
 
 /**
- * One row per task. A deleted task stays as a marker (`deleted`) so other devices drop it too (standard 009, 9.7.4).
- * `seq` is a per-owner counter that goes up on every change; it is the cursor clients pull by.
+ * Everything a person keeps (tasks, tags, focus sessions, the stopwatch, settings), one row per record. `data` is
+ * the kind's JSON, checked against `shared/records.ts` on every write. A deleted record stays as a marker
+ * (`deleted`) so other devices drop it too (standard 009, 9.7.4). `seq` is a per-owner counter that goes up on
+ * every change; it is the cursor clients pull by.
  */
-export const tasks = sqliteTable(
-  "tasks",
+export const records = sqliteTable(
+  "records",
   {
     owner: text("owner").notNull(),
+    kind: text("kind").notNull(),
     id: text("id").notNull(),
-    text: text("text").notNull(),
-    done: integer("done", { mode: "boolean" }).notNull(),
-    doneAt: integer("done_at"),
-    archived: integer("archived", { mode: "boolean" }).notNull(),
-    duration: integer("duration").notNull(),
-    position: text("position").notNull(),
+    data: text("data").notNull(),
     deleted: integer("deleted", { mode: "boolean" }).notNull(),
     version: integer("version").notNull(),
     seq: integer("seq").notNull(),
+    updatedAt: integer("updated_at").notNull(),
   },
   (table) => [
-    primaryKey({ columns: [table.owner, table.id] }),
-    index("tasks_owner_seq").on(table.owner, table.seq),
+    primaryKey({ columns: [table.owner, table.kind, table.id] }),
+    index("records_owner_seq").on(table.owner, table.seq),
   ]
 );

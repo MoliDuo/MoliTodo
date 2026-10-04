@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { MeResponse } from "@shared/api";
 import { fetchMe, signInUrl, UnauthorizedError } from "./api";
 import { createTodoStore, type TodoStore } from "./store";
-import { TodoApp } from "./TodoApp";
+import { Shell } from "./Shell";
 
 type State = { status: "loading" } | { status: "ready"; me: MeResponse } | { status: "error" };
 
@@ -25,7 +25,7 @@ export function App({ fetchFn = (...args) => fetch(...args) }: { fetchFn?: typeo
     };
   }, [fetchFn]);
 
-  if (state.status === "ready") return <TodoApp store={store} me={state.me} />;
+  if (state.status === "ready") return <Shell store={store} me={state.me} />;
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 p-6">
       <h1 className="text-xl font-semibold">Moli Todo</h1>

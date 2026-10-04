@@ -7,10 +7,10 @@ import { LoginStore, SessionStore } from "./auth/stores.js";
 import type { Config } from "./config.js";
 import type { Db } from "./db/client.js";
 import { authRoutes } from "./routes/auth.js";
-import { taskRoutes } from "./routes/tasks.js";
+import { recordRoutes } from "./routes/records.js";
 import { webRoutes } from "./routes/web.js";
 import { minClientVersionGuard } from "./client-version.js";
-import { TaskStore } from "./tasks/store.js";
+import { RecordStore } from "./records/store.js";
 import { meResponseSchema } from "@shared/api";
 
 export interface AppDeps {
@@ -83,7 +83,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     })
   );
 
-  taskRoutes(app, new TaskStore(db));
+  recordRoutes(app, new RecordStore(db, now));
 
   deps.extend?.(app);
   webRoutes(app, config.WEB_DIST);

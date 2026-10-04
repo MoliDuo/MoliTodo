@@ -3,12 +3,13 @@ import {
   changesResponseSchema,
   CLIENT_HEADER,
   conflictResponseSchema,
-  putTaskResponseSchema,
-  type PutTaskBody,
-} from "@shared/tasks";
+  putRecordResponseSchema,
+  type PutRecordBody,
+  type RecordKind,
+} from "@shared/records";
 
 export interface HttpTransportOptions {
-  /** `<client>/<version>`, e.g. `todo-web/2.0.0`; sent on every request (the 426 check reads it). */
+  /** `<client>/<version>`, e.g. `todo-web/3.0.0`; sent on every request (the 426 check reads it). */
   client: string;
   fetch?: typeof fetch;
 }
@@ -42,21 +43,21 @@ export function createHttpTransport(options: HttpTransportOptions): Transport {
   }
 
   return {
-    async put(id: string, payload: PutTaskBody): Promise<PutResult> {
-      const response = await request(`/api/v1/tasks/${encodeURIComponent(id)}`, {
+    async put(kind: RecordKind, id: string, payload: PutRecordBody): Promise<PutResult> {
+      const response = await request(`/api/v2/records/${kind}/${encodeURIComponent(id)}`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
       });
       if (response.status === 200) {
-        const parsed = putTaskResponseSchema.safeParse(await body(response));
+        const parsed = putRecordResponseSchema.safeParse(await body(response));
         if (!parsed.success) throw new SyncError("offline", "unexpected response");
-        return { kind: "ok", task: parsed.data.task };
+        return { kind: "ok", record: parsed.data.record };
       }
       if (response.status === 409) {
         const parsed = conflictResponseSchema.safeParse(await body(response));
         if (!parsed.success) throw new SyncError("offline", "unexpected response");
-        return { kind: "conflict", task: parsed.data.task };
+        return { kind: "conflict", record: parsed.data.record };
       }
       if (response.status === 400 || response.status === 404 || response.status === 413) {
         throw new SyncError("rejected");
@@ -65,7 +66,7 @@ export function createHttpTransport(options: HttpTransportOptions): Transport {
     },
 
     async changes(cursor: number, limit: number) {
-      const response = await request(`/api/v1/tasks/changes?cursor=${cursor}&limit=${limit}`);
+      const response = await request(`/api/v2/changes?cursor=${cursor}&limit=${limit}`);
       if (response.status !== 200)
         throw new SyncError("offline", `server answered ${response.status}`);
       const parsed = changesResponseSchema.safeParse(await body(response));
