@@ -1,6 +1,6 @@
 import { CheckCircle2, Circle, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
-import type { SyncEngine, ViewTask } from "@shared/sync";
+import type { SyncEngine, ViewTask } from "../lib/sync";
 
 /** Enter commits unless an input method is still composing (a Chinese IME uses Enter to pick a word). */
 export const isCommitKey = (event: React.KeyboardEvent): boolean =>

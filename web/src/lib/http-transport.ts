@@ -5,15 +5,11 @@ import {
   conflictResponseSchema,
   putTaskResponseSchema,
   type PutTaskBody,
-} from "./tasks";
+} from "@shared/tasks";
 
 export interface HttpTransportOptions {
-  /** "" for the website (same origin); another origin's address. */
-  baseUrl?: string;
   /** `<client>/<version>`, e.g. `todo-web/2.0.0`; sent on every request (the 426 check reads it). */
   client: string;
-  /** Extra headers; read on every request. */
-  headers?: () => Promise<Record<string, string>> | Record<string, string>;
   fetch?: typeof fetch;
 }
 
@@ -22,12 +18,11 @@ export function createHttpTransport(options: HttpTransportOptions): Transport {
   const doFetch = options.fetch ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
 
   async function request(path: string, init: RequestInit = {}): Promise<Response> {
-    const extra = (await options.headers?.()) ?? {};
     let response: Response;
     try {
-      response = await doFetch(`${options.baseUrl ?? ""}${path}`, {
+      response = await doFetch(path, {
         ...init,
-        headers: { [CLIENT_HEADER]: options.client, ...extra, ...(init.headers as object) },
+        headers: { [CLIENT_HEADER]: options.client, ...(init.headers as object) },
         credentials: "same-origin",
       });
     } catch {

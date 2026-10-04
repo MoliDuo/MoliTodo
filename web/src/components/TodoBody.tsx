@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { SyncEngine } from "@shared/sync";
+import type { SyncEngine } from "../lib/sync";
 import { CompletedView } from "./CompletedView";
 import { Conflicts } from "./Conflicts";
 import { AddTask, TaskList } from "./TaskList";

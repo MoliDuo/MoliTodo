@@ -312,7 +312,8 @@ describe("sync", () => {
     expect(screen.getByText("离线写的")).toBeTruthy();
     api.fail = null;
     fireEvent.click(screen.getByTitle("立即同步"));
-    await waitFor(() => expect(puts(api)).toHaveLength(1));
+    // The attempt that failed offline, and the retry once the network is back.
+    await waitFor(() => expect(puts(api)).toHaveLength(2));
     await waitFor(() => expect(screen.getByRole("status").textContent).toMatch(/已同步/));
   });
 

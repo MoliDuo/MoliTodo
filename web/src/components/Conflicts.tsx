@@ -1,4 +1,4 @@
-import type { SyncEngine } from "@shared/sync";
+import type { SyncEngine } from "../lib/sync";
 
 export function Conflicts({ engine }: { engine: SyncEngine }) {
   const conflicts = engine.getState().conflicts;

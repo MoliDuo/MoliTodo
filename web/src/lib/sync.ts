@@ -5,8 +5,8 @@
 // kept in `conflicts` so it can be copied back.
 
 import { positionAfter, positionBetween } from "./position";
-import { MAX_DURATION_MINUTES, type Task, type TaskContent } from "./tasks";
-import type { ChangesResponse, PutTaskBody } from "./tasks";
+import { MAX_DURATION_MINUTES, type Task, type TaskContent } from "@shared/tasks";
+import type { ChangesResponse, PutTaskBody } from "@shared/tasks";
 
 export interface PendingChange {
   content: TaskContent;
