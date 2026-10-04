@@ -16,6 +16,13 @@ Moli Todo 部署在 Moli 服务器上的 Docker 里，地址 <https://todo.xiang
 | `DEPLOY_SERVER`                  | 服务器在内网里的地址                                 |
 | `DEPLOY_SERVER_USER`             | 部署登录用的服务器账号                               |
 
+**GitHub（仓库密钥，目前没有用到，保留备用）**
+
+| 名字                                 | 用途                                         |
+| ------------------------------------ | -------------------------------------------- |
+| `TAURI_SIGNING_PRIVATE_KEY`          | 客户端更新签名私钥；本应用已没有客户端，保留 |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | 上面私钥的密码                               |
+
 **服务器上 `/data/apps/todo/.env`（权限 600，不进仓库）**，模板是 [deploy/env.example](../deploy/env.example)：
 
 | 名字                 | 用途                                     |
