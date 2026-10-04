@@ -116,9 +116,14 @@ jobs:
           cargo fmt --all -- --check
           cargo test -p moli-todo-core --locked
           cargo clippy --workspace --all-targets --locked -- -D warnings
+      # With a made-up update key in the config, so the update plugin's code is compiled too: a release build
+      # has one, and the config is expanded into the app at compile time.
       - name: Compile the desktop app
         if: runner.os != 'Linux'
-        run: npx tauri build --debug --no-bundle --ci
+        shell: bash
+        run: |
+          npx tauri build --debug --no-bundle --ci \
+            --config '{"plugins":{"updater":{"pubkey":"dGVzdA==","endpoints":["https://example.invalid/latest.json"]}}}'
 
   ci-gate:
     if: always()

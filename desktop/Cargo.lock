@@ -2312,6 +2312,7 @@ name = "moli-todo"
 version = "0.0.0"
 dependencies = [
  "moli-todo-core",
+ "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-autostart",
