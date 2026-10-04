@@ -108,7 +108,7 @@ export function TaskList({ engine, tasks }: { engine: SyncEngine; tasks: ViewTas
           <EditableText task={task} onSave={(text) => engine.update(task.id, { text })} />
           <button
             type="button"
-            onClick={() => engine.remove(task.id)}
+            onClick={() => engine.removeFromList(task.id)}
             aria-label={`删除 ${task.text}`}
             className="text-muted hover:text-danger"
           >

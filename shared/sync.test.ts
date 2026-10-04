@@ -124,6 +124,19 @@ describe("SyncEngine editing", () => {
     expect(e.all().map((t) => t.text)).toEqual(["a", "c"]);
   });
 
+  it("removeFromList keeps a finished task in the completed view and deletes an open one", () => {
+    const e = device(new FakeServer());
+    const a = e.add("a") as string;
+    const b = e.add("b") as string;
+    e.toggle(a);
+    e.removeFromList(a);
+    e.removeFromList(b);
+    expect(texts(e)).toEqual([]);
+    expect(e.all().map((t) => t.text)).toEqual(["a"]);
+    expect(e.get(a)).toMatchObject({ done: true, archived: true, deleted: false });
+    expect(e.get(b)).toMatchObject({ deleted: true });
+  });
+
   it("moves one task and leaves the others' order keys alone", () => {
     const e = device(new FakeServer());
     const [a, b, c] = ["a", "b", "c"].map((t) => e.add(t) as string);

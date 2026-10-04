@@ -233,6 +233,13 @@ export class SyncEngine {
     this.update(id, { deleted: true });
   }
 
+  /** Delete from the to-do list: a finished task moves to the completed view, an open one is deleted. */
+  removeFromList(id: string): void {
+    const current = this.get(id);
+    if (!current) return;
+    this.update(id, current.done ? { archived: true } : { deleted: true });
+  }
+
   /** Moves finished tasks out of the to-do list; they stay in the completed view. */
   clearCompleted(): void {
     for (const task of this.list()) if (task.done) this.update(task.id, { archived: true });
