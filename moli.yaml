@@ -1,0 +1,19 @@
+name: MoliTodo
+id: todo
+kind: web
+level: L2
+
+login:
+  mode: P1
+  client_id: moli-todo
+  protected_api: /api/v1/me
+
+deploy:
+  platform: docker
+  domain: todo.xiangyu.pro
+
+data:
+  db: sqlite
+
+release:
+  kind: service

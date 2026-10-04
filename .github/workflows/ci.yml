@@ -1,0 +1,98 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # A commit the merge queue landed on main is the very commit the queue already tested (same SHA),
+  # so the push run skips the checks instead of repeating them. Direct pushes run everything.
+  verified:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    outputs:
+      skip: ${{ steps.queue.outputs.skip }}
+    steps:
+      - id: queue
+        uses: MoliDuo/MoliKit/actions/verified@52bbc8ec5c0e34f0bb97fa95dbcca5ffe298d07a # v1.2.0
+
+  # `npm run check`: formatting, lint, types, tests with the coverage floor, and a production build.
+  check:
+    needs: verified
+    if: needs.verified.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false # setup-node caches npm by itself when package.json has packageManager
+      - run: npm ci
+      - run: npm run check
+
+  gitleaks:
+    needs: verified
+    if: needs.verified.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # The official image, not gitleaks-action (paid for organizations).
+      - uses: MoliDuo/MoliKit/actions/gitleaks@52bbc8ec5c0e34f0bb97fa95dbcca5ffe298d07a # v1.2.0
+
+  # The image is what actually runs: build it as the deploy does, apply the migrations, start it, and
+  # check that /healthz answers with the commit it was built from.
+  build:
+    needs: verified
+    if: needs.verified.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Build the image
+        run: docker build --build-arg VERSION=${{ github.sha }} -t moli-todo:ci .
+      - name: Start it with throwaway settings
+        run: |
+          cat > ci.env <<'ENV'
+          APP_URL=https://todo.example.com
+          OIDC_ISSUER=https://auth.example.com
+          OIDC_CLIENT_ID=moli-todo
+          OIDC_CLIENT_SECRET=ci-throwaway
+          OIDC_NATIVE_CLIENT_ID=moli-todo-app
+          ENV
+          mkdir -m 777 data
+          docker run --rm --env-file ci.env -v "$PWD/data:/app/data" moli-todo:ci node dist/server/migrate.js
+          docker run -d --name todo --env-file ci.env -v "$PWD/data:/app/data" moli-todo:ci
+      - name: Check /healthz reports this commit
+        run: |
+          for i in $(seq 1 30); do
+            body=$(docker exec todo node -e 'fetch("http://127.0.0.1:3000/healthz").then((r) => r.text()).then(console.log)' 2>/dev/null) && break
+            sleep 2
+          done
+          echo "$body"
+          [ "$body" = "{\"ok\":true,\"version\":\"${{ github.sha }}\"}" ]
+      - name: Show the logs when it fails
+        if: failure()
+        run: docker logs todo
+
+  ci-gate:
+    if: always()
+    needs: [verified, check, gitleaks, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: MoliDuo/MoliKit/actions/ci-gate@52bbc8ec5c0e34f0bb97fa95dbcca5ffe298d07a # v1.2.0
+        with:
+          needs: ${{ toJSON(needs) }}

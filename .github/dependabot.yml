@@ -1,0 +1,16 @@
+# 参考：规范 004 的 4.7.1。复制到 .github/dependabot.yml，ecosystem 按技术栈调整。
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      all:
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

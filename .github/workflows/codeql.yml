@@ -1,0 +1,41 @@
+# 参考：CodeQL 代码扫描（规范 004 的 4.7.4）。公开仓库复制到 .github/workflows/codeql.yml。
+# languages 按仓库里有的语言填：actions（工作流）、javascript-typescript、python、go、java-kotlin、swift 等；
+# 有几种就在 matrix 里写几行。编译型语言的 build-mode 按 CodeQL 文档选，不需要编译的写 none。
+# 第三方 action 的提交哈希随 Dependabot 更新（规范 4.7.1）。
+name: codeql
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 3 * * 1" # 周一 11:17 新加坡时间（GitHub 的 schedule 只认 UTC，规范 013 的 13.2.5）
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: actions
+            build-mode: none
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+      - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          category: /language:${{ matrix.language }}
