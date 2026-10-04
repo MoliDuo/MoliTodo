@@ -49,6 +49,9 @@ PUBKEY="$PUBKEY" CONF="$CONF" REPO="$REPO" node -e '
     updater: {
       pubkey: process.env.PUBKEY,
       endpoints: [`https://github.com/${process.env.REPO}/releases/latest/download/latest.json`],
+      // The release build records the version in each update signature, so a signature made for an older
+      // release cannot be passed off as a newer one.
+      requireSignedVersion: true,
     },
   };
   fs.writeFileSync(process.env.CONF, JSON.stringify(conf, null, 2) + "\n");

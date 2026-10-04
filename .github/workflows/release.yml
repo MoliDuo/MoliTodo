@@ -248,7 +248,13 @@ jobs:
             take "*.app.tar.gz.sig" "MoliTodo_${VERSION}_macos_arm64.app.tar.gz.sig"
             app=$(find "$bundle/macos" -maxdepth 1 -name '*.app' | head -1)
             codesign --verify --deep --strict --verbose=2 "$app"
-            codesign -dv "$app" 2>&1 | grep -E 'Identifier|Authority|Signature|TeamIdentifier' || true
+            details=$(codesign -dv "$app" 2>&1)
+            echo "$details" | grep -E 'Identifier|Authority|Signature|TeamIdentifier' || true
+            # An ad-hoc signature means the certificate was not used, and macOS would ask for permissions again.
+            if echo "$details" | grep -q 'Signature=adhoc'; then
+              echo "::error::the app has an ad-hoc signature, not the shared certificate's"
+              exit 1
+            fi
           fi
           ls -l out
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
