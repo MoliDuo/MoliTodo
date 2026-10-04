@@ -25,7 +25,7 @@ export function webRoutes(app: FastifyInstance, webDist: string) {
   });
 
   const page = async (request: FastifyRequest, reply: FastifyReply) => {
-    if (request.auth?.via !== "session") {
+    if (!request.auth) {
       const next = encodeURIComponent(request.url);
       return reply.redirect(`/auth/login?next=${next}`, 302);
     }

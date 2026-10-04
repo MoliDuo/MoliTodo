@@ -425,7 +425,7 @@ describe("createHttpTransport", () => {
     const calls: { url: string; init: RequestInit }[] = [];
     const transport = createHttpTransport({
       baseUrl: "https://todo.example.com",
-      client: "todo-desktop/2.0.0",
+      client: "todo-web/2.0.0",
       headers: () => ({ authorization: "Bearer abc" }),
       fetch: async (input, init) => {
         calls.push({ url: String(input), init: init ?? {} });
@@ -442,7 +442,7 @@ describe("createHttpTransport", () => {
     expect(call?.url).toBe("https://todo.example.com/api/v1/tasks/t-0000001");
     expect(call?.init.method).toBe("PUT");
     expect(call?.init.headers).toMatchObject({
-      "x-moli-client": "todo-desktop/2.0.0",
+      "x-moli-client": "todo-web/2.0.0",
       authorization: "Bearer abc",
       "content-type": "application/json",
     });

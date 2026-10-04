@@ -9,8 +9,6 @@ const envSchema = z.object({
   /** The web client (confidential). */
   OIDC_CLIENT_ID: z.string().min(1),
   OIDC_CLIENT_SECRET: z.string().min(1),
-  /** The desktop client (public); its id is the expected `aud` of bearer tokens. */
-  OIDC_NATIVE_CLIENT_ID: z.string().min(1),
   DATABASE_PATH: z.string().min(1).default("./data/todo.db"),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   HOST: z.string().default("0.0.0.0"),

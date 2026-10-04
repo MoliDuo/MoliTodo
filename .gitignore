@@ -6,7 +6,6 @@ dist/
 build/
 coverage/
 *.tsbuildinfo
-target/
 
 # Logs
 *.log

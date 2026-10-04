@@ -24,14 +24,14 @@ export default defineConfig({
         define: { __APP_VERSION__: JSON.stringify("0.0.0-test") },
         test: {
           name: "web",
-          include: ["web/**/*.test.{ts,tsx}", "desktop/**/*.test.{ts,tsx}"],
+          include: ["web/**/*.test.{ts,tsx}"],
           environment: "jsdom",
         },
       },
     ],
     coverage: {
       provider: "v8",
-      include: ["server/src/**", "shared/**", "web/src/**", "desktop/src/**", "scripts/release/**"],
+      include: ["server/src/**", "shared/**", "web/src/**"],
       exclude: [
         "**/*.test.*",
         "**/test-support/**",
@@ -39,11 +39,6 @@ export default defineConfig({
         "server/src/server.ts",
         "server/src/migrate.ts",
         "web/src/main.tsx",
-        "desktop/src/main.tsx",
-        // Direct calls into the window toolkit: only a running app can test these.
-        "desktop/src/tauri.ts",
-        // Reads files, runs git and fetches URLs; the logic it calls is tested.
-        "scripts/release/cli.ts",
       ],
       // The floor only goes up (standard 004, 4.4.2): raise it when coverage rises.
       thresholds: { lines: 90, functions: 90, branches: 85, statements: 90 },

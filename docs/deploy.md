@@ -16,24 +16,14 @@ Moli Todo 部署在 Moli 服务器上的 Docker 里，地址 <https://todo.xiang
 | `DEPLOY_SERVER`                  | 服务器在内网里的地址                                 |
 | `DEPLOY_SERVER_USER`             | 部署登录用的服务器账号                               |
 
-**GitHub（发版用，只在 `release` 工作流里读取，见 [release.md](./release.md)）**
-
-| 名字                                 | 用途                                                       |
-| ------------------------------------ | ---------------------------------------------------------- |
-| `TAURI_SIGNING_PRIVATE_KEY`          | 桌面版更新签名私钥，本仓库密钥                             |
-| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | 上面私钥的密码，本仓库密钥                                 |
-| `CODESIGN_P12_BASE64`                | macOS 代码签名证书（组织共用，.p12 的 base64），组织级密钥 |
-| `CODESIGN_P12_PASSWORD`              | 同上证书的密码，组织级密钥                                 |
-
 **服务器上 `/data/apps/todo/.env`（权限 600，不进仓库）**，模板是 [deploy/env.example](../deploy/env.example)：
 
-| 名字                    | 用途                                                        |
-| ----------------------- | ----------------------------------------------------------- |
-| `APP_URL`               | 网站的地址，用来生成登录回调地址                            |
-| `OIDC_ISSUER`           | 统一登录的地址                                              |
-| `OIDC_CLIENT_ID`        | 网页的登录客户端，`moli-todo`                               |
-| `OIDC_CLIENT_SECRET`    | 网页客户端的密钥，登记客户端时只显示一次                    |
-| `OIDC_NATIVE_CLIENT_ID` | 桌面客户端的 id，`moli-todo-app`；桌面令牌的 `aud` 必须是它 |
+| 名字                 | 用途                                     |
+| -------------------- | ---------------------------------------- |
+| `APP_URL`            | 网站的地址，用来生成登录回调地址         |
+| `OIDC_ISSUER`        | 统一登录的地址                           |
+| `OIDC_CLIENT_ID`     | 网页的登录客户端，`moli-todo`            |
+| `OIDC_CLIENT_SECRET` | 网页客户端的密钥，登记客户端时只显示一次 |
 
 ## 2. 首次部署
 
@@ -50,9 +40,7 @@ Moli Todo 部署在 Moli 服务器上的 Docker 里，地址 <https://todo.xiang
    ```
 
 2. 在 `/data/apps/deploy/apps` 里加一行 `todo`，登记这个应用。
-3. 登记两个登录客户端（SOP：MoliSpec 的 `docs/sop/authelia-登记客户端.md`），都显式指定授权策略：
-   - `moli-todo`：机密客户端，回调地址 `https://todo.xiangyu.pro/auth/callback`，策略 `one_factor`；把密钥写进 `.env` 的 `OIDC_CLIENT_SECRET`。
-   - `moli-todo-app`：公开客户端，设备码，要刷新令牌，策略 `one_factor`。
+3. 登记登录客户端 `moli-todo`（SOP：MoliSpec 的 `docs/sop/authelia-登记客户端.md`）：机密客户端，回调地址 `https://todo.xiangyu.pro/auth/callback`，显式指定授权策略 `one_factor`；把密钥写进 `.env` 的 `OIDC_CLIENT_SECRET`。
 4. 把 `deploy.yml` 加进仓库（见 MoliSpec 的 `standards/参考/deploy.yml`，应用标识 `todo`），合并到 `main` 触发第一次部署。
 
 ## 3. 日常部署

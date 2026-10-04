@@ -2,7 +2,7 @@
   "name": "moli-todo",
   "version": "2.1.0",
   "private": true,
-  "description": "Moli Todo: a to-do list for the web and the desktop, with sync",
+  "description": "Moli Todo: a to-do list for the web, with sync",
   "type": "module",
   "engines": {
     "node": "24.x"
@@ -11,7 +11,7 @@
   "scripts": {
     "dev:server": "tsx watch --env-file-if-exists=.env.local server/src/server.ts",
     "dev:web": "vite --config web/vite.config.ts",
-    "build": "npm run build:web && npm run build:desktop && npm run build:server",
+    "build": "npm run build:web && npm run build:server",
     "build:web": "vite build --config web/vite.config.ts",
     "build:server": "node scripts/build-server.mjs",
     "db:generate": "drizzle-kit generate",
@@ -21,19 +21,11 @@
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --coverage",
-    "check": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run build",
-    "dev:desktop": "vite --config desktop/vite.config.ts",
-    "build:desktop": "vite build --config desktop/vite.config.ts",
-    "tauri": "tauri"
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.2",
     "@fastify/static": "^10.1.5",
-    "@tauri-apps/api": "^2.12.1",
-    "@tauri-apps/plugin-autostart": "^2.7.0",
-    "@tauri-apps/plugin-http": "^2.8.0",
-    "@tauri-apps/plugin-opener": "^2.7.0",
-    "@tauri-apps/plugin-updater": "^2.13.1",
     "better-sqlite3": "^13.0.3",
     "drizzle-orm": "^0.45.3",
     "fastify": "^5.12.5",
@@ -46,7 +38,6 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@tailwindcss/vite": "^4.3.3",
-    "@tauri-apps/cli": "^2.12.1",
     "@testing-library/react": "^16.3.3",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.6.3",

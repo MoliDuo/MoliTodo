@@ -4,7 +4,7 @@ import { CompletedView } from "./CompletedView";
 import { Conflicts } from "./Conflicts";
 import { AddTask, TaskList } from "./TaskList";
 
-/** The part of the screen both the website and the desktop widget share: view tabs, add box, the lists. */
+/** The part of the screen the website shows: view tabs, add box, the lists. */
 export function TodoBody({ engine, now }: { engine: SyncEngine; now: number }) {
   const [view, setView] = useState<"todo" | "done">("todo");
   // The engine changes in place; the page re-renders on every change, so the lists are read fresh each time.

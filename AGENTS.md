@@ -39,22 +39,21 @@ These rules apply to every Moli repository. The full standards live in the priva
 
 ## About this project
 
-Moli Todo (`MoliTodo`, id `todo`) is a to-do list that runs as a website and as a desktop widget (Windows, macOS) and syncs between them. One Fastify server owns the data; clients are offline-first (standard 009, 9.7).
+Moli Todo (`MoliTodo`, id `todo`) is a to-do list that runs as a website only (there is no desktop client) and syncs between devices. One Fastify server owns the data; the website keeps its copy in memory and sends every change right away (standard 009, 9.7).
 
-Layout: `server/` (Fastify API, SQLite via Drizzle, sign-in), `web/` (Vite + React site, also the desktop UI), `shared/` (Zod schemas and logic used by both), `desktop/` (Tauri 2: `src-tauri/` Rust shell, `core/` Rust file library, `src/` UI and logic behind `Platform`/`WindowControl` interfaces), `docs/` (Chinese docs; `docs/design/original` is the old Electron app's design mock-up, kept for visual reference only).
+Layout: `server/` (Fastify API, SQLite via Drizzle, sign-in), `web/` (Vite + React site), `shared/` (Zod schemas and logic used by server and web), `docs/` (Chinese docs; `docs/design/original` is the old Electron app's design mock-up, kept for visual reference only).
 
 ## Run and test
 
 - Install: `npm ci`
 - Run the server: `npm run dev:server` (needs the variables in `.env.example`; copy to `.env.local` — never commit it)
 - Run the web UI: `npm run dev:web`
-- Run the desktop app: `npm run tauri dev` (needs Rust and the system WebView libraries; not available on the dev server — CI compiles it on Windows and macOS)
-- Check (same as CI): `npm run check`; Rust: `cd desktop && cargo test -p moli-todo-core`
+- Check (same as CI): `npm run check`
 
 ## Sign-in
 
 - Web: OIDC with Authelia, client `moli-todo`, cookie session (standard 008, 8.5).
-- Desktop: public client `moli-todo-app`, device code flow; the app sends the ID token as `Authorization: Bearer`; the server verifies it locally against the JWKS (8.7). Cookie sessions and bearer tokens are handled separately and never mixed.
+- The server ignores `Authorization` headers; the cookie session is the only way in.
 - The user key is `preferred_username` lower-cased (`owner`).
 
 ## Do not touch

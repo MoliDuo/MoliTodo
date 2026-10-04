@@ -37,7 +37,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     issuer: config.OIDC_ISSUER,
     clientId: config.OIDC_CLIENT_ID,
     clientSecret: config.OIDC_CLIENT_SECRET,
-    nativeClientId: config.OIDC_NATIVE_CLIENT_ID,
     redirectUri: `${config.APP_URL}/auth/callback`,
     ...(deps.fetch ? { fetch: deps.fetch } : {}),
     now,
@@ -47,7 +46,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   app.decorateRequest("auth", null);
   app.addHook("onRequest", async (request) => {
-    request.auth = await authenticate(request, { oidc, sessions });
+    request.auth = authenticate(request, { sessions });
   });
   app.addHook("preHandler", minClientVersionGuard(config.MIN_CLIENT_VERSION));
   app.addHook("preHandler", originGuard(config.APP_URL));

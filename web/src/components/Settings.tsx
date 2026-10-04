@@ -24,10 +24,6 @@ export function Settings(props: {
   /** Shown as the current account. */
   username: string;
   onClose: () => void;
-  /** The desktop app can look for the old app's file itself; returns its text, or null when there is none. */
-  findLegacy?: () => Promise<string | null>;
-  /** Extra sections (the desktop app's account and window settings). */
-  children?: React.ReactNode;
 }) {
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -37,20 +33,6 @@ export function Settings(props: {
     setBusy(true);
     try {
       setMessage(await importLegacyFile(props.engine, await file.text()));
-    } catch {
-      setMessage("导入失败，请重试。");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const importFound = async () => {
-    setBusy(true);
-    try {
-      const text = await props.findLegacy?.();
-      setMessage(
-        text ? await importLegacyFile(props.engine, text) : "没有在这台电脑上找到旧版的任务文件。"
-      );
     } catch {
       setMessage("导入失败，请重试。");
     } finally {
@@ -91,22 +73,11 @@ export function Settings(props: {
           onChange={(event) => void onFile(event.target.files?.[0])}
           className="text-sm"
         />
-        {props.findLegacy && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void importFound()}
-            className="text-accent mt-2 block text-sm"
-          >
-            自动查找并导入
-          </button>
-        )}
         {message && (
           <p role="status" className="mt-3 text-sm">
             {message}
           </p>
         )}
-        {props.children}
       </div>
     </div>
   );
