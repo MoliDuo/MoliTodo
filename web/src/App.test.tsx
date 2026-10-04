@@ -199,6 +199,18 @@ describe("task list", () => {
     expect(puts(api)).toHaveLength(0);
   });
 
+  it("deleting a finished task from the to-do list keeps it in the completed view", async () => {
+    const api = createFakeApi();
+    api.remote("aaaaaaaa-1", content("做完了", "V", { done: true, doneAt: Date.now() }));
+    await open(api);
+    fireEvent.click(await screen.findByLabelText("删除 做完了"));
+    expect(screen.queryByText("做完了")).toBeNull();
+    await waitFor(() => expect(api.rows.get("aaaaaaaa-1")?.archived).toBe(true));
+    expect(api.rows.get("aaaaaaaa-1")?.deleted).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "已完成" }));
+    expect(screen.getByText("做完了")).toBeTruthy();
+  });
+
   it("clears finished tasks into the completed view", async () => {
     const api = createFakeApi();
     api.remote("aaaaaaaa-1", content("做完了", "V", { done: true, doneAt: Date.now() }));
