@@ -63,6 +63,12 @@ impl DataDir {
         fs::rename(&temp, &target)
     }
 
+    /// Replaces a diagnostic file (not one of the data files the page can read back).
+    pub fn write_log(&self, name: &str, text: &str) -> io::Result<()> {
+        fs::create_dir_all(&self.root)?;
+        fs::write(self.root.join(name), text)
+    }
+
     /// Moves an unreadable file aside (`<name>.corrupt-<stamp>`) so the next save does not overwrite it.
     pub fn quarantine(&self, name: &str, stamp: u64) -> io::Result<()> {
         let from = self.path(name)?;

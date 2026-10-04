@@ -1,6 +1,6 @@
 {
   "name": "moli-todo",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "private": true,
   "description": "Moli Todo: a to-do list for the web and the desktop, with sync",
   "type": "module",

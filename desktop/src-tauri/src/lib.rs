@@ -36,6 +36,14 @@ fn read_legacy_store() -> Result<Option<String>, String> {
     read_legacy(appdata.as_deref()).map_err(|e| e.to_string())
 }
 
+/// The page could not start: keep the reason in the data folder (`startup-error.log`) and make sure the
+/// window is visible so the reason can be read in it.
+#[tauri::command]
+fn report_startup_failure(app: AppHandle, dir: State<'_, DataDir>, text: String) {
+    let _ = dir.write_log("startup-error.log", &text);
+    show_main(&app);
+}
+
 #[tauri::command]
 fn quit_app(app: AppHandle) {
     app.exit(0);
@@ -105,6 +113,7 @@ pub fn run() {
             write_data_file,
             quarantine_data_file,
             read_legacy_store,
+            report_startup_failure,
             quit_app,
             updates_enabled,
             install_blocked,
