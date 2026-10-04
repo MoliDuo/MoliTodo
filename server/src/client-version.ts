@@ -1,7 +1,7 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { CLIENT_HEADER } from "@shared/tasks";
+import { CLIENT_HEADER } from "@shared/records";
 
-/** "todo-web/2.0.1" -> [2, 0, 1]; null when the header is missing or not in that form. */
+/** "todo-web/3.0.1" -> [2, 0, 1]; null when the header is missing or not in that form. */
 export function parseClientVersion(header: string | string[] | undefined): number[] | null {
   if (typeof header !== "string") return null;
   const match = /^[A-Za-z][\w-]*\/(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(header);

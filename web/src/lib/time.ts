@@ -1,126 +1,100 @@
-// Dates and durations the way people see them. All days are Singapore days (standard 013): UTC+8, no daylight
-// saving, so day arithmetic is plain offset arithmetic and gives the same answer on every device.
+// Days, dates and durations the way people see them. All days are Singapore days (standard 013): UTC+8, no
+// daylight saving, so day arithmetic is plain offset arithmetic and gives the same answer on every device.
+// A day is named by its key, "YYYY-MM-DD".
+
+import { MAX_DURATION_MINUTES } from "@shared/records";
 
 const HOUR_MS = 60 * 60 * 1000;
-const DAY_MS = 24 * HOUR_MS;
+export const DAY_MS = 24 * HOUR_MS;
 const OFFSET_MS = 8 * HOUR_MS;
-const WEEKDAYS = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
-const RELATIVE_DAYS = ["今天", "昨天", "前天"];
+const WEEKDAYS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 
-export const MAX_DURATION_MINUTES = 100 * 60;
+const pad2 = (value: number): string => String(value).padStart(2, "0");
 
 /** Midnight (Singapore) at the start of the day that contains `timestamp`. */
 export const startOfDay = (timestamp: number): number =>
   Math.floor((timestamp + OFFSET_MS) / DAY_MS) * DAY_MS - OFFSET_MS;
 
-export const addDays = (dayStart: number, days: number): number => dayStart + days * DAY_MS;
-
-/** Calendar parts of a moment, read in Singapore time. */
-function parts(timestamp: number) {
+/** The key of the day that contains `timestamp`. */
+export function dayKey(timestamp: number): string {
   const date = new Date(timestamp + OFFSET_MS);
+  return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`;
+}
+
+/** Midnight (Singapore) for a day key, or null when it is not a real date. */
+export function dayStart(key: string): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
+  if (!match) return null;
+  const [year, month, day] = match.slice(1).map(Number) as [number, number, number];
+  const utc = new Date(Date.UTC(year, month - 1, day));
+  if (utc.getUTCMonth() !== month - 1 || utc.getUTCDate() !== day) return null;
+  return utc.getTime() - OFFSET_MS;
+}
+
+export interface DayParts {
+  year: number;
+  month: number;
+  day: number;
+  /** 0 is Sunday. */
+  weekday: number;
+}
+
+/** The calendar parts of a day key. The key must be valid. */
+export function dayParts(key: string): DayParts {
+  const date = new Date((dayStart(key) as number) + OFFSET_MS);
   return {
     year: date.getUTCFullYear(),
     month: date.getUTCMonth() + 1,
     day: date.getUTCDate(),
     weekday: date.getUTCDay(),
-    hour: date.getUTCHours(),
-    minute: date.getUTCMinutes(),
-    second: date.getUTCSeconds(),
-    ms: date.getUTCMilliseconds(),
   };
 }
 
-const pad2 = (value: number): string => String(value).padStart(2, "0");
+export const addDays = (key: string, days: number): string =>
+  dayKey((dayStart(key) as number) + days * DAY_MS + HOUR_MS);
 
-/** "YYYY-MM-DD", the value format of a date input. */
-export function toDateInputValue(timestamp: number): string {
-  const p = parts(timestamp);
-  return `${p.year}-${pad2(p.month)}-${pad2(p.day)}`;
+/** Whole days from `from` to `to` (negative when `to` is earlier). */
+export const daysBetween = (from: string, to: string): number =>
+  Math.round(((dayStart(to) as number) - (dayStart(from) as number)) / DAY_MS);
+
+export const keyOfDate = (year: number, month: number, day: number): string =>
+  `${year}-${pad2(month)}-${pad2(day)}`;
+
+export const daysInMonth = (year: number, month: number): number =>
+  new Date(Date.UTC(year, month, 0)).getUTCDate();
+
+/** "10月4日" */
+export function formatMonthDay(key: string): string {
+  const p = dayParts(key);
+  return `${p.month}月${p.day}日`;
 }
 
-/** Midnight for a "YYYY-MM-DD" value, or null when it is not a real date. */
-export function parseDateInputValue(value: string): number | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!match) return null;
-  const [year, month, day] = match.slice(1).map(Number) as [number, number, number];
-  const utc = new Date(Date.UTC(year, month - 1, day));
-  if (
-    utc.getUTCFullYear() !== year ||
-    utc.getUTCMonth() !== month - 1 ||
-    utc.getUTCDate() !== day
-  ) {
-    return null;
-  }
-  return utc.getTime() - OFFSET_MS;
+/** "周日" */
+export const formatWeekday = (key: string): string => WEEKDAYS[dayParts(key).weekday] as string;
+
+/** "今天", "昨天", "明天", or null for other days. */
+export function relativeDay(key: string, today: string): string | null {
+  const diff = daysBetween(today, key);
+  return diff === 0 ? "今天" : diff === -1 ? "昨天" : diff === 1 ? "明天" : null;
 }
 
-/**
- * The completion time moved onto `dayStart`, keeping its time of day so the order within a day survives;
- * never later than `now`. A task with no completion time lands at noon.
- */
-export function moveToDay(doneAt: number | null, dayStart: number, now: number): number {
-  const timeOfDay = doneAt === null ? 12 * HOUR_MS : doneAt - startOfDay(doneAt);
-  return Math.min(dayStart + timeOfDay, now);
+/** "10月4日 周日", with the year in front when it is not this year. */
+export function formatFullDay(key: string, today: string): string {
+  const year = dayParts(key).year;
+  const prefix = year === dayParts(today).year ? "" : `${year}年`;
+  return `${prefix}${formatMonthDay(key)} ${formatWeekday(key)}`;
 }
 
+/** Monday of the week that contains the day. */
+export function weekStart(key: string): string {
+  const weekday = dayParts(key).weekday;
+  return addDays(key, weekday === 0 ? -6 : 1 - weekday);
+}
+
+/** "00:30" in Singapore time. */
 export function formatClock(timestamp: number): string {
-  const p = parts(timestamp);
-  return `${pad2(p.hour)}:${pad2(p.minute)}`;
-}
-
-/** "今天", "昨天", "前天", then "10月1日 星期三" (with the year when it is not this year). */
-export function formatDayLabel(dayStart: number, now: number): string {
-  const daysAgo = Math.round((startOfDay(now) - dayStart) / DAY_MS);
-  const relative = RELATIVE_DAYS[daysAgo];
-  if (daysAgo >= 0 && relative) return relative;
-  const p = parts(dayStart);
-  const prefix = p.year === parts(now).year ? "" : `${p.year}年`;
-  return `${prefix}${p.month}月${p.day}日 ${WEEKDAYS[p.weekday]}`;
-}
-
-export interface CompletedTask {
-  done: boolean;
-  doneAt: number | null;
-  duration: number;
-}
-
-export interface DayGroup<T extends CompletedTask> {
-  /** The day's start as text, or "undated". */
-  key: string;
-  dayStart: number | null;
-  tasks: T[];
-  /** Minutes spent that day. */
-  total: number;
-}
-
-export const UNDATED_KEY = "undated";
-
-/** Completed tasks by day, newest day and newest task first; tasks with no completion time come last. */
-export function groupCompletedByDay<T extends CompletedTask>(tasks: T[]): DayGroup<T>[] {
-  const days = new Map<number, T[]>();
-  const undated: T[] = [];
-  for (const task of tasks) {
-    if (!task.done) continue;
-    if (task.doneAt === null) {
-      undated.push(task);
-      continue;
-    }
-    const dayStart = startOfDay(task.doneAt);
-    days.set(dayStart, [...(days.get(dayStart) ?? []), task]);
-  }
-  const sum = (list: T[]) => list.reduce((total, task) => total + task.duration, 0);
-  const groups: DayGroup<T>[] = [...days.entries()]
-    .sort(([a], [b]) => b - a)
-    .map(([dayStart, list]) => ({
-      key: String(dayStart),
-      dayStart,
-      tasks: list.sort((a, b) => (b.doneAt ?? 0) - (a.doneAt ?? 0)),
-      total: sum(list),
-    }));
-  if (undated.length > 0) {
-    groups.push({ key: UNDATED_KEY, dayStart: null, tasks: undated, total: sum(undated) });
-  }
-  return groups;
+  const date = new Date(timestamp + OFFSET_MS);
+  return `${pad2(date.getUTCHours())}:${pad2(date.getUTCMinutes())}`;
 }
 
 function normalizeDurationText(input: string): string {
@@ -136,12 +110,12 @@ function normalizeDurationText(input: string): string {
 }
 
 /**
- * Minutes for "45", "45m", "45分钟", "1h30m", "1小时30分", "1:30" or "1.5h"; 0 for an empty input;
- * null when the input is not a duration or is longer than 100 hours.
+ * Minutes for "45", "45m", "45min", "45分钟", "1h13min", "1小时30分", "1:30" or "1.5h"; null for an empty input
+ * and for one that is not a duration or is longer than 100 hours.
  */
 export function parseDuration(input: string): number | null {
   const text = normalizeDurationText(input);
-  if (!text) return 0;
+  if (!text) return null;
 
   let minutes: number | null = null;
   let match: RegExpExecArray | null;
@@ -150,23 +124,45 @@ export function parseDuration(input: string): number | null {
   } else if (/^\d+$/.test(text)) {
     minutes = Number(text);
   } else if (
-    (match = /^(?:(\d+(?:\.\d+)?)(?:h|hr|hrs|小时|时))?(?:(\d+)(?:m|min|mins|分钟|分)?)?$/.exec(
-      text
-    )) &&
+    (match =
+      /^(?:(\d+(?:\.\d+)?)(?:h|hr|hrs|hour|hours|小时|时))?(?:(\d+)(?:m|min|mins|分钟|分)?)?$/.exec(
+        text
+      )) &&
     (match[1] !== undefined || match[2] !== undefined)
   ) {
     minutes = Number(match[1] ?? 0) * 60 + Number(match[2] ?? 0);
   }
 
-  if (minutes === null || !Number.isFinite(minutes) || minutes > MAX_DURATION_MINUTES) return null;
+  if (minutes === null || minutes > MAX_DURATION_MINUTES) return null;
   return Math.round(minutes);
 }
 
+/** "1h13min", "45min", "2h": short, for task lines. */
 export function formatDuration(minutes: number): string {
   const total = Math.max(0, Math.round(minutes));
   const hours = Math.floor(total / 60);
   const rest = total % 60;
+  if (hours === 0) return `${rest}min`;
+  if (rest === 0) return `${hours}h`;
+  return `${hours}h${rest}min`;
+}
+
+/** "3小时9分", "17分钟", "0分钟": for statistics. Seconds are dropped. */
+export function formatLong(seconds: number): string {
+  const minutes = Math.floor(Math.max(0, seconds) / 60);
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
   if (hours === 0) return `${rest}分钟`;
   if (rest === 0) return `${hours}小时`;
   return `${hours}小时${rest}分`;
+}
+
+/** "05:09" or "1:05:09": a running stopwatch. */
+export function formatStopwatch(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const rest = total % 60;
+  const tail = `${pad2(minutes)}:${pad2(rest)}`;
+  return hours > 0 ? `${hours}:${tail}` : tail;
 }

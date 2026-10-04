@@ -1,52 +1,69 @@
-// Offline-first sync (standard 009, 9.7). The engine keeps a copy of the tasks as the server last had them
-// (`tasks`, with deletion markers), the changes not sent yet (`pending`), and where to pull from (`cursor`).
+// Offline-first sync (standard 009, 9.7). The engine keeps a copy of the records as the server last had them
+// (`records`, with deletion markers), the changes not sent yet (`pending`), and where to pull from (`cursor`).
 // What the person sees is the copy with the pending changes laid over it. Sending a change that the server
-// refuses because someone else changed the task first means the server's version wins; the refused content is
-// kept in `conflicts` so it can be copied back.
+// refuses because someone else changed the record first means the server's version wins; the refused content is
+// kept in `conflicts`.
 
-import { positionAfter, positionBetween } from "./position";
-import { MAX_DURATION_MINUTES, type Task, type TaskContent } from "@shared/tasks";
-import type { ChangesResponse, PutTaskBody } from "@shared/tasks";
+import type {
+  ChangesResponse,
+  PutRecordBody,
+  RecordDataByKind,
+  RecordKind,
+  SyncRecord,
+} from "@shared/records";
 
-export interface PendingChange {
-  content: TaskContent;
-  /** The version the change is based on; 0 for a new task. */
+/** "kind/id": records of different kinds may share an id. */
+export type RecordKey = `${RecordKind}/${string}`;
+export const keyOf = (kind: RecordKind, id: string): RecordKey => `${kind}/${id}`;
+
+export interface RecordContent {
+  data: unknown;
+  deleted: boolean;
+}
+
+export interface PendingChange extends RecordContent {
+  kind: RecordKind;
+  id: string;
+  /** The version the change is based on; 0 for a new record. */
   baseVersion: number;
-  /** An add-only change (import): if the task already exists, drop it without a conflict notice. */
-  quiet?: boolean;
 }
 
 export interface Conflict {
+  kind: RecordKind;
   id: string;
   /** What this device had; the server's version was kept instead. */
-  discarded: TaskContent;
+  discarded: RecordContent;
   at: number;
   reason: "conflict" | "rejected";
 }
 
 export interface SyncState {
-  tasks: Record<string, Task>;
-  pending: Record<string, PendingChange>;
+  records: Record<RecordKey, SyncRecord>;
+  pending: Record<RecordKey, PendingChange>;
   cursor: number;
   conflicts: Conflict[];
   lastSyncAt: number | null;
+  /** True once a pull has finished, so screens can tell "empty" from "not loaded yet". */
+  loaded: boolean;
 }
 
 export const emptyState = (): SyncState => ({
-  tasks: {},
+  records: {},
   pending: {},
   cursor: 0,
   conflicts: [],
   lastSyncAt: null,
+  loaded: false,
 });
 
 /** `idle`: last sync worked (or none yet). `offline`: network or server trouble, changes are kept and retried. */
 export type SyncStatus = "idle" | "syncing" | "offline" | "auth" | "upgrade";
 
-export type PutResult = { kind: "ok"; task: Task } | { kind: "conflict"; task: Task | null };
+export type PutResult =
+  { kind: "ok"; record: SyncRecord } | { kind: "conflict"; record: SyncRecord | null };
 
 export interface Transport {
-  put(id: string, body: PutTaskBody): Promise<PutResult>;
+  put(kind: RecordKind, id: string, body: PutRecordBody): Promise<PutResult>;
   changes(cursor: number, limit: number): Promise<ChangesResponse>;
 }
 
@@ -64,9 +81,11 @@ export class SyncError extends Error {
   }
 }
 
-/** A task as the person sees it. */
-export interface ViewTask extends TaskContent {
+/** A record as the person sees it. */
+export interface View<K extends RecordKind = RecordKind> {
+  kind: K;
   id: string;
+  data: RecordDataByKind[K];
   version: number;
   /** Not sent to the server yet. */
   unsynced: boolean;
@@ -81,41 +100,11 @@ export interface SyncOutcome {
 const MAX_CONFLICTS = 50;
 const PAGE = 200;
 
-const contentOf = ({
-  text,
-  done,
-  doneAt,
-  archived,
-  duration,
-  position,
-  deleted,
-}: TaskContent): TaskContent => ({
-  text,
-  done,
-  doneAt,
-  archived,
-  duration,
-  position,
-  deleted,
-});
-
-const byPosition = (a: ViewTask, b: ViewTask) =>
-  a.position < b.position
-    ? -1
-    : a.position > b.position
-      ? 1
-      : a.id < b.id
-        ? -1
-        : a.id > b.id
-          ? 1
-          : 0;
-
 export interface EngineOptions {
   transport: Transport;
   state?: SyncState;
   now?: () => number;
-  newId?: () => string;
-  /** Called after every change to the state, so it can be saved and the screen redrawn. */
+  /** Called after every change to the state, so the screen can be redrawn. */
   onChange?: (state: SyncState, status: SyncStatus) => void;
 }
 
@@ -125,12 +114,10 @@ export class SyncEngine {
   private running: Promise<SyncOutcome> | null = null;
   private again = false;
   private readonly now: () => number;
-  private readonly newId: () => string;
 
   constructor(private readonly options: EngineOptions) {
     this.state = options.state ?? emptyState();
     this.now = options.now ?? Date.now;
-    this.newId = options.newId ?? (() => crypto.randomUUID());
   }
 
   getState(): SyncState {
@@ -141,129 +128,60 @@ export class SyncEngine {
     return this.status;
   }
 
-  /** Every task still shown anywhere (deleted ones left out), in list order. */
-  all(): ViewTask[] {
-    const ids = new Set([...Object.keys(this.state.tasks), ...Object.keys(this.state.pending)]);
-    const result: ViewTask[] = [];
+  /** The record as it is shown, or null when there is none or it was deleted. */
+  get<K extends RecordKind>(kind: K, id: string): View<K> | null {
+    const key = keyOf(kind, id);
+    const pending = this.state.pending[key];
+    const base = this.state.records[key];
+    const content = pending ?? base;
+    if (!content || content.deleted) return null;
+    return {
+      kind,
+      id,
+      data: content.data as RecordDataByKind[K],
+      version: base?.version ?? 0,
+      unsynced: Boolean(pending),
+    };
+  }
+
+  /** Every record of a kind still shown (deleted ones left out), in no particular order. */
+  all<K extends RecordKind>(kind: K): View<K>[] {
+    const prefix = `${kind}/`;
+    const ids = new Set<string>();
+    for (const source of [this.state.records, this.state.pending]) {
+      for (const key of Object.keys(source)) {
+        if (key.startsWith(prefix)) ids.add(key.slice(prefix.length));
+      }
+    }
+    const result: View<K>[] = [];
     for (const id of ids) {
-      const view = this.get(id);
-      if (view && !view.deleted) result.push(view);
+      const view = this.get(kind, id);
+      if (view) result.push(view);
     }
-    return result.sort(byPosition);
+    return result;
   }
 
-  /** Not archived: the to-do list, finished tasks included until they are cleared. */
-  list(): ViewTask[] {
-    return this.all().filter((task) => !task.archived);
+  /** Stages new content for a record (creating it when there is none). */
+  put<K extends RecordKind>(kind: K, id: string, data: RecordDataByKind[K]): void {
+    this.stage(kind, id, { data, deleted: false });
   }
 
-  get(id: string): ViewTask | null {
-    const pending = this.state.pending[id];
-    const base = this.state.tasks[id];
-    if (pending) {
-      return { id, ...pending.content, version: base?.version ?? 0, unsynced: true };
-    }
-    if (!base) return null;
-    return { id, ...contentOf(base), version: base.version, unsynced: false };
-  }
-
-  /** True when the task exists on this device, deleted or not. */
-  knows(id: string): boolean {
-    return id in this.state.tasks || id in this.state.pending;
-  }
-
-  /** The order key to give a task added at the end of the list. */
-  nextPosition(): string {
-    const last = this.all().at(-1);
-    return positionAfter(last?.position ?? null);
-  }
-
-  add(text: string): string | null {
-    const trimmed = text.trim();
-    if (!trimmed) return null;
-    const id = this.newId();
-    this.stage(id, {
-      text: trimmed,
-      done: false,
-      doneAt: null,
-      archived: false,
-      duration: 0,
-      position: this.nextPosition(),
-      deleted: false,
-    });
-    return id;
-  }
-
-  /** Add-only: stages new tasks and never touches ones that exist (used by import). Returns how many were staged. */
-  addMissing(items: { id: string; content: TaskContent }[]): number {
-    let added = 0;
-    for (const { id, content } of items) {
-      if (this.knows(id)) continue;
-      this.state.pending[id] = { content, baseVersion: 0, quiet: true };
-      added += 1;
-    }
-    this.changed();
-    return added;
-  }
-
-  update(id: string, patch: Partial<TaskContent>): void {
-    const current = this.get(id);
-    if (!current || current.deleted) return;
-    const next = { ...contentOf(current), ...patch };
-    if (typeof patch.text === "string") {
-      next.text = patch.text.trim();
-      if (!next.text) return;
-    }
-    next.duration = Math.min(Math.max(0, Math.round(next.duration)), MAX_DURATION_MINUTES);
-    this.stage(id, next);
-  }
-
-  toggle(id: string): void {
-    const current = this.get(id);
+  /** Merges a patch into a shown record; does nothing when the record is not shown. */
+  update<K extends RecordKind>(kind: K, id: string, patch: Partial<RecordDataByKind[K]>): void {
+    const current = this.get(kind, id);
     if (!current) return;
-    const done = !current.done;
-    this.update(id, {
-      done,
-      doneAt: done ? this.now() : null,
-      archived: done ? current.archived : false,
-    });
+    this.put(kind, id, { ...current.data, ...patch });
   }
 
-  remove(id: string): void {
-    this.update(id, { deleted: true });
+  remove(kind: RecordKind, id: string): void {
+    const key = keyOf(kind, id);
+    const content = this.state.pending[key] ?? this.state.records[key];
+    if (!content || content.deleted) return;
+    this.stage(kind, id, { data: content.data, deleted: true });
   }
 
-  /** Delete from the to-do list: a finished task moves to the completed view, an open one is deleted. */
-  removeFromList(id: string): void {
-    const current = this.get(id);
-    if (!current) return;
-    this.update(id, current.done ? { archived: true } : { deleted: true });
-  }
-
-  /** Moves finished tasks out of the to-do list; they stay in the completed view. */
-  clearCompleted(): void {
-    for (const task of this.list()) if (task.done) this.update(task.id, { archived: true });
-  }
-
-  /** Puts `id` right before `beforeId`, or at the end when `beforeId` is null. Only that task changes. */
-  move(id: string, beforeId: string | null): void {
-    const others = this.list().filter((task) => task.id !== id);
-    const index =
-      beforeId === null ? others.length : others.findIndex((task) => task.id === beforeId);
-    if (index < 0) return;
-    const before = others[index - 1]?.position ?? null;
-    const after = others[index]?.position ?? null;
-    this.update(id, { position: positionBetween(before, after) });
-  }
-
-  dismissConflict(id: string): void {
-    this.state.conflicts = this.state.conflicts.filter((conflict) => conflict.id !== id);
-    this.changed();
-  }
-
-  /** Replaces the whole copy, e.g. after signing in as someone else. */
-  reset(): void {
-    this.state = emptyState();
+  dismissConflict(conflict: Conflict): void {
+    this.state.conflicts = this.state.conflicts.filter((c) => c !== conflict);
     this.changed();
   }
 
@@ -283,6 +201,7 @@ export class SyncEngine {
           await this.pull();
         } while (this.again);
         this.state.lastSyncAt = this.now();
+        this.state.loaded = true;
         this.setStatus("idle");
       } catch (error) {
         this.setStatus(
@@ -298,67 +217,74 @@ export class SyncEngine {
     return run;
   }
 
-  private stage(id: string, content: TaskContent): void {
-    const existing = this.state.pending[id];
-    this.state.pending[id] = {
-      content,
-      baseVersion: existing ? existing.baseVersion : (this.state.tasks[id]?.version ?? 0),
-      ...(existing?.quiet ? { quiet: true } : {}),
+  private stage(kind: RecordKind, id: string, content: RecordContent): void {
+    const key = keyOf(kind, id);
+    const existing = this.state.pending[key];
+    this.state.pending[key] = {
+      kind,
+      id,
+      ...content,
+      baseVersion: existing ? existing.baseVersion : (this.state.records[key]?.version ?? 0),
     };
     this.changed();
   }
 
   private async push(outcome: SyncOutcome): Promise<void> {
-    for (const [id, sent] of Object.entries(this.state.pending)) {
+    for (const [key, sent] of Object.entries(this.state.pending) as [RecordKey, PendingChange][]) {
       let result: PutResult;
       try {
-        result = await this.options.transport.put(id, {
-          ...sent.content,
+        result = await this.options.transport.put(sent.kind, sent.id, {
+          data: sent.data,
+          deleted: sent.deleted,
           baseVersion: sent.baseVersion,
         });
       } catch (error) {
         if (error instanceof SyncError && error.kind === "rejected") {
-          this.discard(id, sent, "rejected", outcome);
+          this.discard(key, sent, "rejected", outcome);
           continue;
         }
         throw error;
       }
       if (result.kind === "ok") {
-        this.state.tasks[id] = result.task;
-        const now = this.state.pending[id];
-        if (now === sent) delete this.state.pending[id];
-        else if (now) now.baseVersion = result.task.version;
+        this.state.records[key] = result.record;
+        const now = this.state.pending[key];
+        if (now === sent) delete this.state.pending[key];
+        else if (now) now.baseVersion = result.record.version;
       } else {
-        if (result.task) this.state.tasks[id] = result.task;
-        else delete this.state.tasks[id];
-        this.discard(id, this.state.pending[id] ?? sent, sent.quiet ? null : "conflict", outcome);
+        if (result.record) this.state.records[key] = result.record;
+        else delete this.state.records[key];
+        this.discard(key, this.state.pending[key] ?? sent, "conflict", outcome);
       }
       this.changed();
     }
   }
 
-  /** Drops a pending change; `reason` null drops it silently. */
   private discard(
-    id: string,
+    key: RecordKey,
     pending: PendingChange,
-    reason: Conflict["reason"] | null,
+    reason: Conflict["reason"],
     outcome: SyncOutcome
   ): void {
-    delete this.state.pending[id];
-    if (reason) {
-      const conflict: Conflict = { id, discarded: pending.content, at: this.now(), reason };
-      this.state.conflicts = [conflict, ...this.state.conflicts].slice(0, MAX_CONFLICTS);
-      outcome.conflicts.push(conflict);
-    }
+    delete this.state.pending[key];
+    const conflict: Conflict = {
+      kind: pending.kind,
+      id: pending.id,
+      discarded: { data: pending.data, deleted: pending.deleted },
+      at: this.now(),
+      reason,
+    };
+    this.state.conflicts = [conflict, ...this.state.conflicts].slice(0, MAX_CONFLICTS);
+    outcome.conflicts.push(conflict);
     this.changed();
   }
 
   private async pull(): Promise<void> {
     for (;;) {
       const page = await this.options.transport.changes(this.state.cursor, PAGE);
-      for (const task of page.tasks) {
-        const have = this.state.tasks[task.id];
-        if (!have || have.version < task.version) this.state.tasks[task.id] = task;
+      for (const record of page.records) {
+        const key = keyOf(record.kind, record.id);
+        const have = this.state.records[key];
+        if (!have || have.version < record.version) this.state.records[key] = record;
       }
       this.state.cursor = page.cursor;
       this.changed();

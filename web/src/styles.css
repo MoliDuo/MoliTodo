@@ -1,3 +1,266 @@
 @import "tailwindcss";
 @import "../tokens.css";
 @import "../tailwind.css";
+
+/* "inline": these refer to colours set on <body> by the theme, so they must be worked out where used. */
+@theme inline {
+  --font-serif: Georgia, "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", serif;
+  --color-accent-ink: var(--accent-ink, var(--moli-accent));
+  --color-accent-soft: color-mix(in srgb, var(--moli-accent) 16%, transparent);
+  --color-paper: var(--paper);
+}
+
+:root {
+  --paper: #fffdf8;
+  --paper-edge: #ebe6da;
+  --hl-yellow: #fde68a;
+  --hl-red: #fecaca;
+  --hl-blue: #bfdbfe;
+  --hl-green: #bbf7d0;
+  --hl-purple: #ddd6fe;
+}
+
+:root[data-theme="dark"] {
+  --paper: #1d1c1a;
+  --paper-edge: #2c2a27;
+  --hl-yellow: rgba(250, 204, 21, 0.32);
+  --hl-red: rgba(248, 113, 113, 0.32);
+  --hl-blue: rgba(96, 165, 250, 0.32);
+  --hl-green: rgba(74, 222, 128, 0.28);
+  --hl-purple: rgba(167, 139, 250, 0.34);
+}
+
+html,
+body {
+  background: var(--moli-surface);
+  color: var(--moli-text);
+  font-family: var(--moli-font-sans);
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+}
+
+body {
+  margin: 0;
+}
+
+/* A marker-pen highlight that follows the words across line breaks. */
+.hl {
+  border-radius: 3px;
+  padding: 0 2px;
+  margin: 0 -2px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.hl-yellow {
+  background: var(--hl-yellow);
+}
+.hl-red {
+  background: var(--hl-red);
+}
+.hl-blue {
+  background: var(--hl-blue);
+}
+.hl-green {
+  background: var(--hl-green);
+}
+.hl-purple {
+  background: var(--hl-purple);
+}
+
+/* The editable line: a transparent textarea over a copy of the text that shows tags and highlights. The copy
+   sizes the line; the textarea covers it exactly. */
+.line-edit {
+  position: relative;
+  display: inline-block;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.line-edit textarea {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  font: inherit;
+  letter-spacing: inherit;
+  line-height: inherit;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  resize: none;
+  overflow: hidden;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--moli-text);
+  outline: none;
+}
+.line-edit textarea::placeholder {
+  color: var(--moli-muted);
+  opacity: 0.6;
+}
+.line-edit textarea::selection {
+  background: color-mix(in srgb, var(--moli-accent) 28%, transparent);
+  color: transparent;
+}
+
+.sheet-in {
+  animation: sheet-in 260ms cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+.fade-in {
+  animation: fade-in 200ms ease-out;
+}
+@keyframes sheet-in {
+  from {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Paper: a faint grain so pages do not look like flat screens. */
+.paper {
+  background-color: var(--paper);
+  background-image:
+    radial-gradient(circle at 20% 10%, rgba(255, 255, 255, 0.5), transparent 60%),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.45  0 0 0 0 0.4  0 0 0 0 0.3  0 0 0 0.05 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+:root[data-theme="dark"] .paper {
+  background-image: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet-in,
+  .fade-in {
+    animation: none;
+  }
+}
+
+/* The book ------------------------------------------------------------------------------------------------ */
+
+.book-world {
+  transition: transform 760ms cubic-bezier(0.45, 0, 0.2, 1);
+}
+.book-world.phase-opening {
+  transition-delay: 420ms;
+}
+.book-world .book-left {
+  transition: opacity 360ms ease 420ms;
+}
+.book-world.phase-closed .book-left,
+.book-world.phase-closing .book-left {
+  opacity: 0;
+  transition-delay: 0ms;
+}
+
+.book-case {
+  background-color: var(--moli-accent);
+  background-image:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.14), transparent 45%, rgba(0, 0, 0, 0.16)),
+    radial-gradient(rgba(0, 0, 0, 0.07) 1px, transparent 1.2px);
+  background-size:
+    auto,
+    5px 5px;
+  box-shadow:
+    0 18px 40px -16px rgba(0, 0, 0, 0.45),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+
+.book-page.right::after,
+.book-page.left::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.book-page.right::after {
+  background: linear-gradient(
+    to right,
+    rgba(0, 0, 0, 0.13),
+    rgba(0, 0, 0, 0.03) 4%,
+    transparent 9%
+  );
+}
+.book-page.left::after {
+  background: linear-gradient(to left, rgba(0, 0, 0, 0.13), rgba(0, 0, 0, 0.03) 4%, transparent 9%);
+}
+
+.book-edge {
+  background: repeating-linear-gradient(to right, var(--paper-edge) 0 1px, var(--paper) 1px 2px);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+.endpaper {
+  background-color: color-mix(in srgb, var(--moli-accent) 78%, #000);
+  background-image: radial-gradient(rgba(255, 255, 255, 0.09) 1px, transparent 1.6px);
+  background-size: 14px 14px;
+}
+
+.book-cover {
+  transform-origin: 0 50%;
+  transform-style: preserve-3d;
+  transition: transform 980ms cubic-bezier(0.55, 0, 0.25, 1);
+}
+.book-world.phase-closing .book-cover {
+  transition-delay: 380ms;
+}
+.book-cover-front,
+.book-cover-back {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  backface-visibility: hidden;
+}
+.book-cover-front {
+  border-radius: 4px 12px 12px 4px;
+  box-shadow:
+    0 22px 40px -14px rgba(0, 0, 0, 0.5),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.15);
+}
+.book-cover-back {
+  border-radius: 12px 4px 4px 12px;
+  transform: rotateY(180deg);
+}
+.book-world.phase-opening .book-cover-back {
+  opacity: 0;
+  transition: opacity 260ms ease 860ms;
+}
+.book-cover-spine {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 9%;
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--moli-accent) 70%, #000),
+    var(--moli-accent) 45%,
+    color-mix(in srgb, var(--moli-accent) 80%, #000)
+  );
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.25);
+}
+.book-cover-sheen {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    115deg,
+    rgba(255, 255, 255, 0.2),
+    transparent 38%,
+    rgba(0, 0, 0, 0.14)
+  );
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .book-world,
+  .book-cover,
+  .book-world .book-left {
+    transition: none;
+  }
+}

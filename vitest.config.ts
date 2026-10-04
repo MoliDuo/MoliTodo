@@ -41,7 +41,7 @@ export default defineConfig({
         "web/src/main.tsx",
       ],
       // The floor only goes up (standard 004, 4.4.2): raise it when coverage rises.
-      thresholds: { lines: 90, functions: 90, branches: 85, statements: 90 },
+      thresholds: { lines: 98, functions: 98, branches: 95, statements: 98 },
     },
   },
 });

@@ -1,15 +1,23 @@
 import { describe, expect, it } from "vitest";
 import {
   addDays,
+  dayKey,
+  dayParts,
+  daysBetween,
+  daysInMonth,
+  dayStart,
   formatClock,
-  formatDayLabel,
   formatDuration,
-  groupCompletedByDay,
-  moveToDay,
-  parseDateInputValue,
+  formatFullDay,
+  formatLong,
+  formatMonthDay,
+  formatStopwatch,
+  formatWeekday,
+  keyOfDate,
   parseDuration,
+  relativeDay,
   startOfDay,
-  toDateInputValue,
+  weekStart,
 } from "./time";
 
 // 2026-10-04 12:00 Singapore
@@ -17,106 +25,88 @@ const NOON = Date.parse("2026-10-04T04:00:00Z");
 const MIDNIGHT = Date.parse("2026-10-03T16:00:00Z");
 
 describe("days are Singapore days", () => {
-  it("finds the start of the day, even when UTC is still on the previous date", () => {
+  it("finds the day, even when UTC is still on the previous date", () => {
     expect(startOfDay(NOON)).toBe(MIDNIGHT);
-    expect(startOfDay(MIDNIGHT)).toBe(MIDNIGHT);
-    expect(startOfDay(MIDNIGHT - 1)).toBe(addDays(MIDNIGHT, -1));
-    expect(toDateInputValue(Date.parse("2026-10-03T16:30:00Z"))).toBe("2026-10-04");
+    expect(dayKey(MIDNIGHT)).toBe("2026-10-04");
+    expect(dayKey(MIDNIGHT - 1)).toBe("2026-10-03");
+    expect(dayStart("2026-10-04")).toBe(MIDNIGHT);
     expect(formatClock(Date.parse("2026-10-03T16:30:00Z"))).toBe("00:30");
   });
 
-  it("parses date input values and refuses impossible dates", () => {
-    expect(parseDateInputValue("2026-10-04")).toBe(MIDNIGHT);
-    expect(parseDateInputValue("2026-02-30")).toBeNull();
-    expect(parseDateInputValue("2026-13-01")).toBeNull();
-    expect(parseDateInputValue("2026/10/04")).toBeNull();
-    expect(parseDateInputValue("")).toBeNull();
+  it("refuses impossible day keys", () => {
+    for (const key of ["2026-02-30", "2026-13-01", "2026/10/04", ""]) {
+      expect(dayStart(key)).toBeNull();
+    }
   });
 
-  it("moves a completion time onto another day, keeping the time of day and never going into the future", () => {
-    const doneAt = Date.parse("2026-10-04T01:30:00Z"); // 09:30
-    const yesterday = addDays(MIDNIGHT, -1);
-    expect(moveToDay(doneAt, yesterday, NOON)).toBe(Date.parse("2026-10-03T01:30:00Z"));
-    expect(moveToDay(doneAt, addDays(MIDNIGHT, 3), NOON)).toBe(NOON);
-    expect(moveToDay(null, yesterday, NOON)).toBe(yesterday + 12 * 3600_000);
+  it("does day arithmetic across months and years", () => {
+    expect(addDays("2026-10-04", -4)).toBe("2026-09-30");
+    expect(addDays("2026-12-31", 1)).toBe("2027-01-01");
+    expect(daysBetween("2026-10-04", "2026-09-30")).toBe(-4);
+    expect(keyOfDate(2026, 2, 3)).toBe("2026-02-03");
+    expect(daysInMonth(2028, 2)).toBe(29);
+    expect(dayParts("2026-10-04")).toEqual({ year: 2026, month: 10, day: 4, weekday: 0 });
+  });
+
+  it("finds Monday of a week", () => {
+    expect(weekStart("2026-10-04")).toBe("2026-09-28");
+    expect(weekStart("2026-09-28")).toBe("2026-09-28");
+    expect(weekStart("2026-10-01")).toBe("2026-09-28");
   });
 
   it("labels days", () => {
-    expect(formatDayLabel(MIDNIGHT, NOON)).toBe("今天");
-    expect(formatDayLabel(addDays(MIDNIGHT, -1), NOON)).toBe("昨天");
-    expect(formatDayLabel(addDays(MIDNIGHT, -2), NOON)).toBe("前天");
-    expect(formatDayLabel(addDays(MIDNIGHT, -3), NOON)).toBe("10月1日 星期四");
-    expect(formatDayLabel(parseDateInputValue("2025-12-31") as number, NOON)).toBe(
-      "2025年12月31日 星期三"
-    );
-    expect(formatDayLabel(addDays(MIDNIGHT, 1), NOON)).toBe("10月5日 星期一");
-  });
-});
-
-describe("groupCompletedByDay", () => {
-  const task = (id: string, doneAt: number | null, duration = 0, done = true) => ({
-    id,
-    doneAt,
-    duration,
-    done,
-  });
-
-  it("groups by day, newest first, undated last, with totals", () => {
-    const groups = groupCompletedByDay([
-      task("old", addDays(MIDNIGHT, -2) + 1000, 30),
-      task("a", NOON, 45),
-      task("b", NOON + 60_000, 15),
-      task("none", null, 5),
-      task("open", NOON, 99, false),
-    ]);
-    expect(groups.map((g) => g.key)).toEqual([
-      String(MIDNIGHT),
-      String(addDays(MIDNIGHT, -2)),
-      "undated",
-    ]);
-    expect(groups[0]?.tasks.map((x) => x.id)).toEqual(["b", "a"]);
-    expect(groups.map((g) => g.total)).toEqual([60, 30, 5]);
-    expect(groups[2]?.dayStart).toBeNull();
-  });
-
-  it("returns nothing when nothing is done", () => {
-    expect(groupCompletedByDay([task("x", NOON, 0, false)])).toEqual([]);
+    expect(formatMonthDay("2026-10-04")).toBe("10月4日");
+    expect(formatWeekday("2026-10-04")).toBe("周日");
+    expect(relativeDay("2026-10-04", "2026-10-04")).toBe("今天");
+    expect(relativeDay("2026-10-03", "2026-10-04")).toBe("昨天");
+    expect(relativeDay("2026-10-05", "2026-10-04")).toBe("明天");
+    expect(relativeDay("2026-10-01", "2026-10-04")).toBeNull();
+    expect(formatFullDay("2026-10-01", "2026-10-04")).toBe("10月1日 周四");
+    expect(formatFullDay("2025-12-31", "2026-10-04")).toBe("2025年12月31日 周三");
   });
 });
 
 describe("durations", () => {
-  it.each([
-    ["", 0],
-    ["45", 45],
-    ["45m", 45],
-    ["45分钟", 45],
-    ["45 分", 45],
-    ["1h30m", 90],
-    ["1小时30分", 90],
-    ["1h", 60],
-    ["1:30", 90],
-    ["1：30", 90],
-    ["1.5h", 90],
-    ["１．５ｈ".replace("ｈ", "h"), 90],
-    ["４５", 45],
-    ["100h", 6000],
-    ["1h5", 65],
-  ])("reads %j as %j minutes", (input, minutes) => {
-    expect(parseDuration(input)).toBe(minutes);
+  it("reads the ways people write a duration", () => {
+    const cases: [string, number | null][] = [
+      ["45", 45],
+      ["45m", 45],
+      ["45min", 45],
+      ["45分钟", 45],
+      ["1h13min", 73],
+      ["1H13MIN", 73],
+      ["1小时30分", 90],
+      ["1:30", 90],
+      ["１：３０", 90],
+      ["1.5h", 90],
+      ["2 h", 120],
+      ["", null],
+      ["  ", null],
+      ["abc", null],
+      ["1:75", null],
+      ["6001", null],
+    ];
+    for (const [input, minutes] of cases) expect(parseDuration(input), input).toBe(minutes);
   });
 
-  it.each(["abc", "101h", "6001", "1:75", "h", "1h30x", "-5"])("refuses %j", (input) => {
-    expect(parseDuration(input)).toBeNull();
+  it("writes task durations short", () => {
+    expect(formatDuration(73)).toBe("1h13min");
+    expect(formatDuration(45)).toBe("45min");
+    expect(formatDuration(120)).toBe("2h");
+    expect(formatDuration(-3)).toBe("0min");
   });
 
-  it("formats minutes", () => {
-    expect([0, 5, 60, 90, 125].map(formatDuration)).toEqual([
-      "0分钟",
-      "5分钟",
-      "1小时",
-      "1小时30分",
-      "2小时5分",
-    ]);
-    expect(formatDuration(-3)).toBe("0分钟");
+  it("writes statistics durations in Chinese", () => {
+    expect(formatLong(3 * 3600 + 9 * 60 + 30)).toBe("3小时9分");
+    expect(formatLong(17 * 60)).toBe("17分钟");
+    expect(formatLong(7200)).toBe("2小时");
+    expect(formatLong(-1)).toBe("0分钟");
+  });
+
+  it("shows a stopwatch", () => {
+    expect(formatStopwatch(0)).toBe("00:00");
+    expect(formatStopwatch(309.9)).toBe("05:09");
+    expect(formatStopwatch(3909)).toBe("1:05:09");
+    expect(formatStopwatch(-5)).toBe("00:00");
   });
 });
