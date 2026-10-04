@@ -1,0 +1,34 @@
+# Deploys the commit that a green CI built (Moli standard 005). The server must have the app
+# registered first (docs/deploy.md); the five DEPLOY_* secrets are organization secrets.
+name: deploy
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false # deploys run one at a time
+
+jobs:
+  deploy:
+    # Only after ci succeeded on main
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: MoliDuo/MoliKit/actions/deploy@9b799ce70581440f1598ece62c068dd0b881b955 # v1.2.1
+        with:
+          app: todo
+          sha: ${{ github.event.workflow_run.head_sha }}
+          host-key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGYuCUIofB2A+wuIb0aVrQgoIJH+UgVIYn0PSZtmFk+q"
+          server: ${{ secrets.DEPLOY_SERVER }}
+          server-user: ${{ secrets.DEPLOY_SERVER_USER }}
+          ssh-key: ${{ secrets.DEPLOY_SSH_KEY }}
+          tailscale-client-id: ${{ secrets.DEPLOY_TAILSCALE_CLIENT_ID }}
+          tailscale-client-secret: ${{ secrets.DEPLOY_TAILSCALE_CLIENT_SECRET }}
