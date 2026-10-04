@@ -1,0 +1,9 @@
+dist
+coverage
+node_modules
+package-lock.json
+docs/design/original
+server/migrations/meta
+AGENTS.md
+web/tokens.css
+web/tailwind.css
