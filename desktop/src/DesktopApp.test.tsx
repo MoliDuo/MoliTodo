@@ -310,9 +310,12 @@ describe("settings", () => {
 describe("updates", () => {
   const offer: UpdateOffer = { version: "2.1.0", notes: "新增：设置里可以检查更新" };
 
-  async function openWithUpdates(overrides: Partial<Updater> = {}) {
-    const world = createWorld();
-    const platform = createMemoryPlatform(world);
+  async function openWithUpdates(
+    overrides: Partial<Updater> = {},
+    files: Parameters<typeof createMemoryPlatform>[1] = {},
+    world = createWorld()
+  ) {
+    const platform = createMemoryPlatform(world, files);
     const session = await createSession({ platform, sleep });
     const win = createFakeWindow();
     const installs: string[] = [];
@@ -330,27 +333,53 @@ describe("updates", () => {
     render(
       <DesktopApp session={session} platform={platform} windowControl={win} updates={updates} />
     );
-    return { updates, win, installs, world };
+    return { updates, win, installs, world, platform, session };
   }
 
-  it("offers the new version with its notes, and installs on 「立即更新」", async () => {
+  it("locks the app on a new version, with its notes and only 「立即更新」", async () => {
     const { updates, installs } = await openWithUpdates();
+    expect(screen.getByLabelText("添加任务")).toBeTruthy();
     await act(() => updates.checkNow());
-    const notice = await screen.findByRole("status", { name: "更新提示" });
-    expect(notice.textContent).toContain("新版本 2.1.0 可用");
-    expect(notice.textContent).toContain("新增：设置里可以检查更新");
-    fireEvent.click(within(notice).getByText("立即更新"));
+    const gate = await screen.findByRole("status", { name: "需要更新" });
+    expect(gate.textContent).toContain("需要更新到 2.1.0 才能继续使用");
+    expect(gate.textContent).toContain("新增：设置里可以检查更新");
+    expect(screen.queryByLabelText("添加任务")).toBeNull();
+    expect(screen.queryByText("稍后")).toBeNull();
+    expect(screen.queryByLabelText("设置")).toBeNull();
+    expect(screen.queryByLabelText("折叠")).toBeNull();
+    expect(screen.getByLabelText("隐藏")).toBeTruthy();
+    fireEvent.click(within(gate).getByText("立即更新"));
     await waitFor(() => expect(installs).toEqual(["install"]));
-    expect(screen.getByRole("status", { name: "更新提示" }).textContent).toContain(
+    expect(screen.getByRole("status", { name: "需要更新" }).textContent).toContain(
       "正在下载并安装"
     );
   });
 
-  it("puts it off with 「稍后」", async () => {
-    const { updates } = await openWithUpdates();
+  it("stays locked and says so when the install fails", async () => {
+    const { updates } = await openWithUpdates({
+      install: async () => {
+        throw new Error("signature mismatch");
+      },
+    });
     await act(() => updates.checkNow());
-    fireEvent.click(await screen.findByText("稍后"));
-    expect(screen.queryByRole("status", { name: "更新提示" })).toBeNull();
+    fireEvent.click(await screen.findByText("立即更新"));
+    expect((await screen.findByRole("alert")).textContent).toBe("更新没有完成，请重试。");
+    expect(screen.getByText("立即更新")).toBeTruthy();
+    expect(screen.queryByLabelText("添加任务")).toBeNull();
+  });
+
+  it("closes settings and opens up a collapsed window, without changing the saved choice", async () => {
+    const { updates, win, session } = await openWithUpdates(
+      {},
+      { "settings.json": JSON.stringify({ collapsed: true }) }
+    );
+    fireEvent.click(screen.getByLabelText("设置"));
+    expect(screen.getByText("检查更新…")).toBeTruthy();
+    await act(() => updates.checkNow());
+    expect(await screen.findByRole("status", { name: "需要更新" })).toBeTruthy();
+    expect(screen.queryByText("检查更新…")).toBeNull();
+    expect(win.calls).toContain("collapsed:false:480");
+    expect(session.settings().collapsed).toBe(true);
   });
 
   it("answers 「检查更新…」 in settings, and says so when it is the latest", async () => {
@@ -372,30 +401,25 @@ describe("updates", () => {
     );
   });
 
-  it("looks for an update right away when the server says this version is too old", async () => {
+  it("looks for the update right away when the server says this version is too old", async () => {
     const world = createWorld();
     world.server.fail = 426;
-    const platform = createMemoryPlatform(world, signedInFiles);
-    const session = await createSession({ platform, sleep });
-    const updates = createUpdateController({
-      updater: {
-        check: async () => offer,
-        install: async () => undefined,
-        installBlocked: async () => false,
-      },
-      setTimer: () => 0,
-      clearTimer: () => undefined,
-    });
-    render(
-      <DesktopApp
-        session={session}
-        platform={platform}
-        windowControl={createFakeWindow()}
-        updates={updates}
-      />
-    );
-    expect((await screen.findByRole("status", { name: "更新提示" })).textContent).toContain(
+    await openWithUpdates({}, signedInFiles, world);
+    expect((await screen.findByRole("status", { name: "需要更新" })).textContent).toContain(
       "2.1.0"
     );
+  });
+
+  it("locks the app when the server says it is too old and there is no update to install", async () => {
+    const world = createWorld();
+    world.server.fail = 426;
+    const { platform } = await openWithUpdates({ check: async () => null }, signedInFiles, world);
+    const gate = await screen.findByRole("status", { name: "需要更新" });
+    expect(gate.textContent).toContain("这个版本已不再支持");
+    expect(screen.queryByLabelText("添加任务")).toBeNull();
+    fireEvent.click(within(gate).getByText("打开下载页"));
+    expect(platform.opened).toEqual(["https://github.com/MoliDuo/MoliTodo/releases/latest"]);
+    fireEvent.click(within(gate).getByText("重新检查"));
+    expect((await within(gate).findByRole("alert")).textContent).toContain("还没有可安装的新版本");
   });
 });

@@ -19,7 +19,8 @@ const isOlder = (version: number[], minimum: number[]): boolean => {
 
 /**
  * preHandler for `/api/` routes: a client that says it is older than the configured minimum is told to update (426).
- * Clients that send no version (the website, which is always current) are let through.
+ * That includes a website tab opened before the last deploy (`todo-web/<version>`), which then reloads itself.
+ * Requests that send no version, or one in another form, are let through.
  */
 export function minClientVersionGuard(minimum: string | undefined) {
   const min = minimum ? minimum.split(".").map(Number) : null;

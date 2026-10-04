@@ -43,7 +43,8 @@ export function createTauriUpdater(): Updater {
       return found ? { version: found.version, notes: found.body ?? "" } : null;
     },
     async install() {
-      if (!found) return;
+      // Nothing found by the last check (it failed, or the release was withdrawn): say so, so the app stays locked.
+      if (!found) throw new Error("no update to install");
       await found.downloadAndInstall();
       await invoke<void>("restart_app");
     },

@@ -1,6 +1,7 @@
 import { bearerHeaders, DeviceAuth, TokenManager } from "@shared/device-auth";
 import { createHttpTransport } from "@shared/http-transport";
 import { meResponseSchema } from "@shared/api";
+import { CLIENT_HEADER } from "@shared/tasks";
 import type { SyncState } from "@shared/sync";
 import { createStore, type TodoStore } from "@web/store";
 import { CLIENT_NAME, OIDC_CLIENT_ID, OIDC_ISSUER, SERVER_URL } from "./config";
@@ -96,7 +97,7 @@ export async function createSession(options: SessionOptions): Promise<Session> {
       saveSettings();
     },
     async completeSignIn() {
-      const headers = await bearerHeaders(tokens)();
+      const headers = { [CLIENT_HEADER]: CLIENT_NAME, ...(await bearerHeaders(tokens)()) };
       const response = await platform.fetch(`${SERVER_URL}/api/v1/me`, { headers });
       if (!response.ok) throw new Error(`could not read the account: ${response.status}`);
       const me = meResponseSchema.parse(await response.json());

@@ -8,6 +8,8 @@ export interface AutoSyncOptions {
   refreshMs: number;
   /** Called when the server says the sign-in is no longer valid. */
   onAuthLost?: () => void;
+  /** Called when the server says this version is too old (426). */
+  onUpgradeRequired?: () => void;
 }
 
 /**
@@ -17,7 +19,7 @@ export interface AutoSyncOptions {
 export function useAutoSync(store: TodoStore, options: AutoSyncOptions): number {
   const tick = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const { engine } = store;
-  const { refreshMs, onAuthLost } = options;
+  const { refreshMs, onAuthLost, onUpgradeRequired } = options;
 
   useEffect(() => {
     void engine.sync();
@@ -47,7 +49,8 @@ export function useAutoSync(store: TodoStore, options: AutoSyncOptions): number 
 
   useEffect(() => {
     if (status === "auth") onAuthLost?.();
-  }, [status, onAuthLost]);
+    if (status === "upgrade") onUpgradeRequired?.();
+  }, [status, onAuthLost, onUpgradeRequired]);
 
   return tick;
 }

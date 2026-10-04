@@ -339,13 +339,23 @@ describe("sync", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("asks to refresh when the app is too old, and signs in again when the session ends", async () => {
+  it("reloads once when the app is too old, then asks, and signs in again when the session ends", async () => {
+    window.sessionStorage.clear();
     const api = await open();
+    const reload = vi.fn();
+    const assign = vi.fn();
+    vi.stubGlobal("location", { ...window.location, pathname: "/", search: "", assign, reload });
+    api.fail = 426;
+    fireEvent.click(screen.getByTitle("立即同步"));
+    await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+    // The page is still the old one (the reload was faked): no second reload right after the first.
+    api.fail = null;
+    fireEvent.click(screen.getByTitle("立即同步"));
+    await waitFor(() => expect(screen.getByRole("status").textContent).not.toMatch(/版本太旧/));
     api.fail = 426;
     fireEvent.click(screen.getByTitle("立即同步"));
     await waitFor(() => expect(screen.getByRole("status").textContent).toMatch(/版本太旧/));
-    const assign = vi.fn();
-    vi.stubGlobal("location", { ...window.location, pathname: "/", search: "", assign });
+    expect(reload).toHaveBeenCalledTimes(1);
     api.fail = 401;
     fireEvent.click(screen.getByTitle("立即同步"));
     await waitFor(() => expect(assign).toHaveBeenCalledWith("/auth/login?next=%2F"));

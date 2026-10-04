@@ -6,5 +6,8 @@ export const OIDC_CLIENT_ID = import.meta.env.VITE_OIDC_CLIENT_ID ?? "moli-todo-
 /** Sent on every request so the server can tell an app that is too old to update (426). */
 export const CLIENT_NAME = `todo-desktop/${__APP_VERSION__}`;
 
+/** Where to download the app by hand, when it is too old and cannot update itself. */
+export const DOWNLOAD_URL = "https://github.com/MoliDuo/MoliTodo/releases/latest";
+
 /** Pull this often while the widget is open (standard 009, 9.7.3). */
 export const REFRESH_MS = 15 * 60 * 1000;
