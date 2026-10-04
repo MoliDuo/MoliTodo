@@ -33,6 +33,7 @@
     "@tauri-apps/plugin-autostart": "^2.7.0",
     "@tauri-apps/plugin-http": "^2.8.0",
     "@tauri-apps/plugin-opener": "^2.7.0",
+    "@tauri-apps/plugin-updater": "^2.13.1",
     "better-sqlite3": "^13.0.3",
     "drizzle-orm": "^0.45.3",
     "fastify": "^5.12.5",

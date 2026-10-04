@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronUp, Settings as SettingsIcon, X } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { Settings } from "@web/components/Settings";
 import { SyncBadge } from "@web/components/SyncBadge";
 import { TodoBody } from "@web/components/TodoBody";
@@ -8,6 +8,7 @@ import { REFRESH_MS } from "./config";
 import { LoginDialog } from "./Login";
 import type { Platform, WindowControl } from "./platform";
 import type { Session } from "./session";
+import type { UpdateController } from "./updates";
 
 /** Height of the title bar: what is left of the window when it is collapsed. */
 export const COLLAPSED_HEIGHT = 44;
@@ -77,12 +78,55 @@ function Toggle(props: { label: string; checked: boolean; onChange: (on: boolean
   );
 }
 
+/** The one notice about updates: a new version, progress, or the answer to 「检查更新…」 (standard 007, 7.4.4). */
+function UpdateNotice({ updates }: { updates: UpdateController }) {
+  const state = useSyncExternalStore(updates.subscribe, updates.getState);
+  if (state.phase === "idle") return null;
+  return (
+    <div
+      role="status"
+      aria-label="更新提示"
+      className="bg-surface-2 flex flex-col gap-1 rounded-lg px-3 py-2 text-sm"
+    >
+      {state.phase === "available" && (
+        <>
+          <span>新版本 {state.offer.version} 可用</span>
+          {state.offer.notes && (
+            <span className="text-muted line-clamp-3 text-xs whitespace-pre-line">
+              {state.offer.notes}
+            </span>
+          )}
+          <span className="flex gap-3">
+            <button type="button" className="text-accent" onClick={() => void updates.install()}>
+              立即更新
+            </button>
+            <button type="button" className="text-muted" onClick={() => updates.dismiss()}>
+              稍后
+            </button>
+          </span>
+        </>
+      )}
+      {state.phase === "installing" && <span>正在下载并安装 {state.offer.version}…</span>}
+      {state.phase === "message" && (
+        <span className="flex items-center gap-2">
+          <span className="flex-1">{state.text}</span>
+          <button type="button" className="text-muted" onClick={() => updates.dismiss()}>
+            知道了
+          </button>
+        </span>
+      )}
+    </div>
+  );
+}
+
 export interface DesktopAppProps {
   session: Session;
   platform: Platform;
   windowControl: WindowControl;
   now?: () => number;
   version?: string;
+  /** Absent in a build that cannot update. */
+  updates?: UpdateController;
 }
 
 export function DesktopApp({
@@ -91,6 +135,7 @@ export function DesktopApp({
   windowControl,
   now = Date.now,
   version,
+  updates,
 }: DesktopAppProps) {
   const { engine } = session.store;
   useAutoSync(session.store, { refreshMs: REFRESH_MS });
@@ -103,6 +148,23 @@ export function DesktopApp({
   const [, refreshAccount] = useState(0);
   const status = engine.getStatus();
   const signedIn = session.tokens.signedIn;
+
+  useEffect(() => {
+    if (!updates) return;
+    updates.start();
+    const stopListening = windowControl.onCheckUpdates(
+      () => void updates.checkNow({ manual: true })
+    );
+    return () => {
+      updates.stop();
+      stopListening();
+    };
+  }, [updates, windowControl]);
+
+  // The server turned this version away: look for the update right away instead of waiting for the hour.
+  useEffect(() => {
+    if (status === "upgrade") void updates?.checkNow({ ignoreDismissed: true });
+  }, [status, updates]);
 
   useEffect(() => {
     void windowControl.isAutostart().then(setAutostart, () => undefined);
@@ -205,6 +267,7 @@ export function DesktopApp({
                 </button>
               </div>
             )}
+            {updates && !settingsOpen && <UpdateNotice updates={updates} />}
             <TodoBody engine={engine} now={now()} />
           </main>
           <footer className="border-border shrink-0 border-t px-3 py-1">
@@ -236,7 +299,17 @@ export function DesktopApp({
             }}
             onChanged={() => refreshAccount((n) => n + 1)}
           />
-          {version && <p className="text-muted mt-4 text-xs">版本 {version}</p>}
+          {updates && <UpdateNotice updates={updates} />}
+          {updates && (
+            <button
+              type="button"
+              className="text-accent mt-3 text-sm"
+              onClick={() => void updates.checkNow({ manual: true })}
+            >
+              检查更新…
+            </button>
+          )}
+          {version && <p className="text-muted mt-2 text-xs">版本 {version}</p>}
         </Settings>
       )}
 

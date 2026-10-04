@@ -123,11 +123,14 @@ export function createMemoryPlatform(
 
 export function createFakeWindow() {
   const listeners = new Set<(change: { permanentTop?: boolean; autostart?: boolean }) => void>();
+  const checkListeners = new Set<() => void>();
   const calls: string[] = [];
   const state = { autostart: false };
   const control = {
     state,
     calls,
+    /** 「检查更新…」 chosen in the tray menu. */
+    trayCheckUpdates: () => checkListeners.forEach((l) => l()),
     /** The tray menu changes something. */
     tray: (change: { permanentTop?: boolean; autostart?: boolean }) =>
       listeners.forEach((l) => l(change)),
@@ -141,6 +144,10 @@ export function createFakeWindow() {
     },
     hide: async () => void calls.push("hide"),
     quit: async () => void calls.push("quit"),
+    onCheckUpdates: (listener: () => void) => {
+      checkListeners.add(listener);
+      return () => checkListeners.delete(listener);
+    },
     onTrayChange: (listener: (change: { permanentTop?: boolean; autostart?: boolean }) => void) => {
       listeners.add(listener);
       return () => listeners.delete(listener);

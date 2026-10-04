@@ -1,12 +1,12 @@
 //! Moli Todo desktop shell. The interface, sync and sign-in are in the web page (`desktop/src`); this side
 //! only gives it what a page cannot have: files in the app's data folder, the old app's task file, requests
 //! to the sign-in service without the browser's cross-site limits (the http plugin), a tray icon, autostart,
-//! and a way to quit.
+//! a way to quit and restart, and the update plugin when the build has an update key.
 
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use moli_todo_core::{read_legacy_store as read_legacy, DataDir};
+use moli_todo_core::{read_legacy_store as read_legacy, runs_from_disk_image, DataDir};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_autostart::MacosLauncher;
 
@@ -41,6 +41,27 @@ fn quit_app(app: AppHandle) {
     app.exit(0);
 }
 
+/// Updates are only on in a build that was given an update key (`plugins.updater` in tauri.conf.json,
+/// written by `scripts/setup-updater-keys.sh`). Without it the plugin is not even started, so a
+/// development build or an unreleased tree still runs.
+#[tauri::command]
+fn updates_enabled(app: AppHandle) -> bool {
+    app.config().plugins.0.contains_key("updater")
+}
+
+/// True when the app runs from a mounted disk image and so cannot replace itself (standard 007, 7.4.5).
+#[tauri::command]
+fn install_blocked() -> bool {
+    std::env::current_exe()
+        .map(|exe| runs_from_disk_image(&exe))
+        .unwrap_or(false)
+}
+
+#[tauri::command]
+fn restart_app(app: AppHandle) {
+    app.restart();
+}
+
 fn show_main(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -62,6 +83,10 @@ pub fn run() {
         ))
         .setup(|app| {
             app.manage(DataDir::new(app.path().app_data_dir()?));
+            if app.config().plugins.0.contains_key("updater") {
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())?;
+            }
             // The page shows the window once it has put it back where it was. If the page fails to start,
             // show it anyway so the app never stays invisible.
             let handle = app.handle().clone();
@@ -80,7 +105,10 @@ pub fn run() {
             write_data_file,
             quarantine_data_file,
             read_legacy_store,
-            quit_app
+            quit_app,
+            updates_enabled,
+            install_blocked,
+            restart_app
         ])
         .run(tauri::generate_context!())
         .expect("error while running Moli Todo");

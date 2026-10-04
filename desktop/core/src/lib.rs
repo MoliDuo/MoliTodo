@@ -74,6 +74,13 @@ impl DataDir {
 }
 
 /// Where the old app kept its tasks, given the value of `%APPDATA%` (None off Windows).
+/// True when the app runs from a mounted disk image or a quarantined copy macOS runs from a temporary
+/// location (App Translocation). Such a copy cannot replace itself, so updating asks to move it first.
+pub fn runs_from_disk_image(exe: &Path) -> bool {
+    let text = exe.to_string_lossy();
+    text.starts_with("/Volumes/") || text.contains("/AppTranslocation/")
+}
+
 pub fn legacy_store_path(appdata: Option<&Path>) -> Option<PathBuf> {
     appdata.map(|dir| dir.join(LEGACY_FOLDER).join("store.json"))
 }
@@ -95,6 +102,24 @@ pub fn read_legacy_store(appdata: Option<&Path>) -> io::Result<Option<String>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn disk_image_and_translocated_copies_cannot_update_themselves() {
+        use super::runs_from_disk_image as blocked;
+        use std::path::Path;
+        assert!(blocked(Path::new(
+            "/Volumes/Moli Todo/Moli Todo.app/Contents/MacOS/moli-todo"
+        )));
+        assert!(blocked(Path::new(
+            "/private/var/folders/x/AppTranslocation/ABC/d/Moli Todo.app/Contents/MacOS/moli-todo"
+        )));
+        assert!(!blocked(Path::new(
+            "/Applications/Moli Todo.app/Contents/MacOS/moli-todo"
+        )));
+        assert!(!blocked(Path::new(
+            r"C:\Users\a\AppData\Local\Moli Todo\moli-todo.exe"
+        )));
+    }
+
     use super::*;
 
     fn dir() -> (tempfile::TempDir, DataDir) {

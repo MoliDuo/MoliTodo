@@ -16,4 +16,5 @@ data:
   db: sqlite
 
 release:
-  kind: service
+  kind: client # 桌面安装包；网页服务端由部署上线（规范 006 的 6.1）
+  mode: manual
