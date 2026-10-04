@@ -52,18 +52,26 @@ jobs:
       # The official image, not gitleaks-action (paid for organizations).
       - uses: MoliDuo/MoliKit/actions/gitleaks@52bbc8ec5c0e34f0bb97fa95dbcca5ffe298d07a # v1.2.0
 
-  # The image is what actually runs: build it as the deploy does, apply the migrations, start it, and
-  # check that /healthz answers with the commit it was built from.
+  # Linux: the image is what actually runs on the server. Build it as the deploy does, apply the migrations,
+  # start it, and check that /healthz answers with the commit it was built from.
+  # Windows and macOS: the desktop app. Test the Rust core, lint the Tauri crate, and compile the app
+  # without bundling it (installers are built by the release workflow).
   build:
     needs: verified
     if: needs.verified.outputs.skip != 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Build the image
+        if: runner.os == 'Linux'
         run: docker build --build-arg VERSION=${{ github.sha }} -t moli-todo:ci .
       - name: Start it with throwaway settings
+        if: runner.os == 'Linux'
         run: |
           cat > ci.env <<'ENV'
           APP_URL=https://todo.example.com
@@ -76,6 +84,7 @@ jobs:
           docker run --rm --env-file ci.env -v "$PWD/data:/app/data" moli-todo:ci node dist/server/migrate.js
           docker run -d --name todo --env-file ci.env -v "$PWD/data:/app/data" moli-todo:ci
       - name: Check /healthz reports this commit
+        if: runner.os == 'Linux'
         run: |
           for i in $(seq 1 30); do
             body=$(docker exec todo node -e 'fetch("http://127.0.0.1:3000/healthz").then((r) => r.text()).then(console.log)' 2>/dev/null) && break
@@ -84,8 +93,32 @@ jobs:
           echo "$body"
           [ "$body" = "{\"ok\":true,\"version\":\"${{ github.sha }}\"}" ]
       - name: Show the logs when it fails
-        if: failure()
+        if: failure() && runner.os == 'Linux'
         run: docker logs todo
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        if: runner.os != 'Linux'
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false # setup-node caches npm by itself when package.json has packageManager
+      - name: Install the Rust toolchain
+        if: runner.os != 'Linux'
+        shell: bash
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+      - name: Install npm packages
+        if: runner.os != 'Linux'
+        run: npm ci
+      - name: Test and lint the Rust code
+        if: runner.os != 'Linux'
+        shell: bash
+        working-directory: desktop
+        run: |
+          cargo fmt --all -- --check
+          cargo test -p moli-todo-core --locked
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Compile the desktop app
+        if: runner.os != 'Linux'
+        run: npx tauri build --debug --no-bundle --ci
 
   ci-gate:
     if: always()
