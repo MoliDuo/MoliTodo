@@ -8,11 +8,11 @@ import {
 } from "./tasks";
 
 export interface HttpTransportOptions {
-  /** "" for the website (same origin); the site's address for the desktop app. */
+  /** "" for the website (same origin); another origin's address. */
   baseUrl?: string;
-  /** `<client>/<version>`, e.g. `todo-desktop/2.0.0`; sent on every request (the 426 check reads it). */
+  /** `<client>/<version>`, e.g. `todo-web/2.0.0`; sent on every request (the 426 check reads it). */
   client: string;
-  /** Extra headers, e.g. the bearer token; read on every request so a refreshed token is used. */
+  /** Extra headers; read on every request. */
   headers?: () => Promise<Record<string, string>> | Record<string, string>;
   fetch?: typeof fetch;
 }

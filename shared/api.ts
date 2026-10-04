@@ -12,7 +12,7 @@ export const meResponseSchema = z.object({
   username: z.string().min(1),
   name: z.string().nullable(),
   email: z.string().nullable(),
-  /** How the request was authenticated: browser cookie or desktop bearer token. */
+  /** How the request was authenticated: always the browser cookie session. */
   via: z.enum(["session", "bearer"]),
 });
 export type MeResponse = z.infer<typeof meResponseSchema>;

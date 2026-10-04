@@ -8,8 +8,6 @@ export interface OidcOptions {
   issuer: string;
   clientId: string;
   clientSecret: string;
-  /** `aud` expected on bearer tokens from the desktop client. */
-  nativeClientId: string;
   redirectUri: string;
   fetch?: FetchLike;
   now?: () => number;
@@ -147,11 +145,11 @@ export class OidcClient {
     }
   }
 
-  private async verify(token: string, audience: string): Promise<JWTPayload> {
+  private async verify(token: string): Promise<JWTPayload> {
     try {
       const { payload } = await jwtVerify(token, (header, jwt) => this.resolveKey(header, jwt), {
         issuer: this.options.issuer,
-        audience,
+        audience: this.options.clientId,
         algorithms: ["RS256"],
         currentDate: new Date(this.now()),
         clockTolerance: CLOCK_SKEW_SECONDS,
@@ -178,23 +176,11 @@ export class OidcClient {
 
   /** The ID token from the web callback: signature, iss, aud, exp, iat, nonce, username (8.5.3). */
   async verifyIdToken(token: string, expectedNonce: string): Promise<Identity> {
-    const payload = await this.verify(token, this.options.clientId);
+    const payload = await this.verify(token);
     const nowSeconds = this.now() / 1000;
     const iat = payload.iat as number;
     if (nowSeconds - iat > MAX_ID_TOKEN_AGE_SECONDS) throw new OidcError("ID token is too old");
     if (payload["nonce"] !== expectedNonce) throw new OidcError("nonce mismatch");
-    return this.identityOf(payload);
-  }
-
-  /**
-   * An ID token a desktop client sends as `Authorization: Bearer` (8.7.3): `aud` is the desktop client.
-   * It is not rejected for being old: it lives until `exp`, and the desktop refreshes it (8.7.5).
-   */
-  async verifyBearerToken(token: string): Promise<Identity> {
-    const payload = await this.verify(token, this.options.nativeClientId);
-    if ((payload.iat as number) - this.now() / 1000 > CLOCK_SKEW_SECONDS) {
-      throw new OidcError("token issued in the future");
-    }
     return this.identityOf(payload);
   }
 }

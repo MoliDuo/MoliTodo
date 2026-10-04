@@ -4,7 +4,6 @@ COPY package.json package-lock.json ./
 # better-sqlite3 ships prebuilt binaries; skipping install scripts avoids a source build that needs Python and a compiler.
 RUN npm ci --ignore-scripts
 COPY . .
-# The desktop app is built on its own runners (desktop/ is not part of the image).
 RUN npm run build:web && npm run build:server && npm prune --omit=dev
 
 FROM node:24-slim

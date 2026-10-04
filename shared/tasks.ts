@@ -61,5 +61,5 @@ export const conflictResponseSchema = z.object({
 });
 export type ConflictResponse = z.infer<typeof conflictResponseSchema>;
 
-/** Header every client sends: `<client>/<version>`, e.g. `todo-desktop/2.0.0`. */
+/** Header every client sends: `<client>/<version>`, e.g. `todo-web/2.0.0`. */
 export const CLIENT_HEADER = "x-moli-client";

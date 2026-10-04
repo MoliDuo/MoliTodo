@@ -3,7 +3,7 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { buildApp } from "../src/app.js";
 import type { Config } from "../src/config.js";
 import { openDb } from "../src/db/client.js";
-import { createFakeIssuer, ISSUER, NATIVE_CLIENT, WEB_CLIENT, WEB_SECRET } from "./fake-issuer.js";
+import { createFakeIssuer, ISSUER, WEB_CLIENT, WEB_SECRET } from "./fake-issuer.js";
 
 export const APP_URL = "https://todo.example.com";
 
@@ -13,7 +13,6 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     OIDC_ISSUER: ISSUER,
     OIDC_CLIENT_ID: WEB_CLIENT,
     OIDC_CLIENT_SECRET: WEB_SECRET,
-    OIDC_NATIVE_CLIENT_ID: NATIVE_CLIENT,
     DATABASE_PATH: ":memory:",
     PORT: 3000,
     HOST: "127.0.0.1",

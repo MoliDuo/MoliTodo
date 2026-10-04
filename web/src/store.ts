@@ -1,5 +1,5 @@
 import { createHttpTransport } from "@shared/http-transport";
-import { SyncEngine, type SyncState, type SyncStatus, type Transport } from "@shared/sync";
+import { SyncEngine, type Transport } from "@shared/sync";
 
 export const WEB_CLIENT = `todo-web/${__APP_VERSION__}`;
 
@@ -10,23 +10,13 @@ export interface TodoStore {
   getSnapshot: () => number;
 }
 
-export interface StoreOptions {
-  transport: Transport;
-  /** A saved copy to start from (the desktop app keeps one on disk). */
-  state?: SyncState;
-  /** Called after every change, for saving. */
-  onChange?: (state: SyncState, status: SyncStatus) => void;
-}
-
-export function createStore(options: StoreOptions): TodoStore {
+function createStore(transport: Transport): TodoStore {
   const listeners = new Set<() => void>();
   let tick = 0;
   const engine = new SyncEngine({
-    transport: options.transport,
-    ...(options.state ? { state: options.state } : {}),
-    onChange: (state, status) => {
+    transport,
+    onChange: () => {
       tick += 1;
-      options.onChange?.(state, status);
       listeners.forEach((listener) => listener());
     },
   });
@@ -45,5 +35,5 @@ export function createStore(options: StoreOptions): TodoStore {
  * every change is sent right away (standard 009, 9.7: no offline queue on the web).
  */
 export function createTodoStore(fetchFn: typeof fetch = (...args) => fetch(...args)): TodoStore {
-  return createStore({ transport: createHttpTransport({ client: WEB_CLIENT, fetch: fetchFn }) });
+  return createStore(createHttpTransport({ client: WEB_CLIENT, fetch: fetchFn }));
 }

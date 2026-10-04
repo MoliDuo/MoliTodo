@@ -21,6 +21,6 @@
       "@web/*": ["./web/src/*"]
     }
   },
-  "include": ["server", "web", "shared", "desktop/src", "desktop/*.ts", "scripts", "*.ts", "*.mjs"],
+  "include": ["server", "web", "shared", "scripts", "*.ts", "*.mjs"],
   "exclude": ["node_modules", "dist", "coverage"]
 }

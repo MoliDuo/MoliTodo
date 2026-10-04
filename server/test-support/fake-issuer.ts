@@ -4,7 +4,6 @@ import { SignJWT, exportJWK, generateKeyPair, type JWTPayload } from "jose";
 export const ISSUER = "https://auth.example.com";
 export const WEB_CLIENT = "moli-todo";
 export const WEB_SECRET = "test-client-secret";
-export const NATIVE_CLIENT = "moli-todo-app";
 export const REDIRECT_URI = "https://todo.example.com/auth/callback";
 
 interface Pending {
@@ -28,11 +27,14 @@ export async function createFakeIssuer(clock: { now: number }) {
   const pending = new Map<string, Pending>();
   let counter = 0;
   const requests: string[] = [];
+  let lastIdToken = "";
   const state = {
     /** Replaces claims of the next ID token returned by the token endpoint. */
     override: {} as JWTPayload,
     /** Sign the next token with a key the server does not know. */
     signWithRogueKey: false,
+    /** Sign the next token with this algorithm instead of RS256. */
+    signWithAlg: undefined as "RS384" | undefined,
     jwks: [await publish(main.pair, "k1")] as object[],
     /** The service starts signing with a new key and publishes it next to the old one. */
     async rotate() {
@@ -109,8 +111,11 @@ export async function createFakeIssuer(clock: { now: number }) {
       };
       state.override = {};
       const rogueKey = state.signWithRogueKey;
+      const alg = state.signWithAlg;
       state.signWithRogueKey = false;
-      return json({ id_token: await sign(claims, { rogue: rogueKey }), token_type: "Bearer" });
+      state.signWithAlg = undefined;
+      lastIdToken = await sign(claims, { rogue: rogueKey, ...(alg ? { alg } : {}) });
+      return json({ id_token: lastIdToken, token_type: "Bearer" });
     }
     return new Response("not found", { status: 404 });
   };
@@ -119,6 +124,8 @@ export async function createFakeIssuer(clock: { now: number }) {
     fetch: fetchFake,
     state,
     requests,
+    /** The ID token the token endpoint handed out last (a real, valid one). */
+    lastIdToken: async () => lastIdToken,
     /** The user signs in at the identity service: returns what Authelia would send back to the callback. */
     approve(authorizeUrl: string, username = "alice") {
       const url = new URL(authorizeUrl);
@@ -130,11 +137,5 @@ export async function createFakeIssuer(clock: { now: number }) {
       });
       return { code, state: url.searchParams.get("state") ?? "" };
     },
-    /** An ID token as the desktop client would hold it. */
-    nativeToken(username = "alice", extra: JWTPayload = {}, options: { rogue?: boolean } = {}) {
-      return sign(claimsFor(username, NATIVE_CLIENT, extra), options);
-    },
-    sign,
-    claimsFor,
   };
 }

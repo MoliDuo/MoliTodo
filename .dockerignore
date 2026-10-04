@@ -8,5 +8,4 @@ dist
 coverage
 data
 docs
-desktop
 *.tsbuildinfo

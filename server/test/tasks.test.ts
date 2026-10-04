@@ -169,34 +169,12 @@ describe("tasks API", () => {
     });
     expect(res.statusCode).toBe(403);
   });
-
-  it("works with a desktop bearer token", async () => {
-    const t = await setup();
-    const token = await t.issuer.nativeToken("carol");
-    const res = await t.app.inject({
-      method: "PUT",
-      url: `/api/v1/tasks/${ID}`,
-      headers: { authorization: `Bearer ${token}` },
-      payload: body(),
-    });
-    expect(res.statusCode).toBe(200);
-    const list = await t.app.inject({
-      method: "GET",
-      url: "/api/v1/tasks/changes",
-      headers: { authorization: `Bearer ${token}` },
-    });
-    expect(list.json().tasks).toHaveLength(1);
-  });
 });
 
 describe("minimum client version", () => {
   it("tells older clients to update, with the minimum", async () => {
     const t = await setup({ MIN_CLIENT_VERSION: "2.1.0" });
-    for (const header of [
-      "todo-desktop/2.0.9",
-      "todo-desktop/1.9.9",
-      "todo-desktop/2.0.0-beta.1",
-    ]) {
+    for (const header of ["todo-web/2.0.9", "todo-web/1.9.9", "todo-web/2.0.0-beta.1"]) {
       const res = await t.app.inject({
         method: "GET",
         url: "/api/v1/tasks/changes",
@@ -213,7 +191,7 @@ describe("minimum client version", () => {
 
   it("lets current clients, clients with no or odd headers, and non-API paths through", async () => {
     const t = await setup({ MIN_CLIENT_VERSION: "2.1.0" });
-    for (const header of ["todo-desktop/2.1.0", "todo-desktop/3.0.0", "garbage", undefined]) {
+    for (const header of ["todo-web/2.1.0", "todo-web/3.0.0", "garbage", undefined]) {
       const res = await t.app.inject({
         method: "GET",
         url: "/api/v1/tasks/changes",
@@ -225,7 +203,7 @@ describe("minimum client version", () => {
     const health = await t.app.inject({
       method: "GET",
       url: "/healthz",
-      headers: { "x-moli-client": "todo-desktop/1.0.0" },
+      headers: { "x-moli-client": "todo-web/1.0.0" },
     });
     expect(health.statusCode).toBe(200);
   });
@@ -236,7 +214,7 @@ describe("minimum client version", () => {
       method: "GET",
       url: "/api/v1/tasks/changes",
       cookies: t.cookie,
-      headers: { "x-moli-client": "todo-desktop/0.0.1" },
+      headers: { "x-moli-client": "todo-web/0.0.1" },
     });
     expect(res.statusCode).toBe(200);
   });

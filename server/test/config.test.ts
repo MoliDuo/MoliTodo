@@ -6,7 +6,6 @@ const valid = {
   OIDC_ISSUER: "https://auth.example.com",
   OIDC_CLIENT_ID: "moli-todo",
   OIDC_CLIENT_SECRET: "secret-value",
-  OIDC_NATIVE_CLIENT_ID: "moli-todo-app",
 };
 
 describe("loadConfig", () => {

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { sessions, users } from "../src/db/schema.js";
 import { createTestApp } from "../test-support/app.js";
-import { ISSUER, NATIVE_CLIENT, WEB_CLIENT } from "../test-support/fake-issuer.js";
+import { ISSUER, WEB_CLIENT } from "../test-support/fake-issuer.js";
 
 type Ctx = Awaited<ReturnType<typeof createTestApp>>;
 let ctx: Ctx;
@@ -221,73 +221,28 @@ describe("sessions", () => {
   });
 });
 
-describe("desktop bearer token", () => {
-  const me = (c: Ctx, token: string) =>
-    c.app.inject({
+describe("Authorization header", () => {
+  it("does not sign anyone in: a Bearer token is not a way in", async () => {
+    ctx = await createTestApp();
+    const { code, state, cookie } = await startLogin(ctx);
+    const callback = await ctx.app.inject({
       method: "GET",
-      url: "/api/v1/me",
-      headers: { authorization: `Bearer ${token}` },
+      url: `/auth/callback?code=${code}&state=${state}`,
+      cookies: { "__Host-todo_login": cookie },
     });
-
-  it("accepts a valid token", async () => {
-    ctx = await createTestApp();
-    const res = await me(ctx, await ctx.issuer.nativeToken("Bob"));
-    expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({ username: "bob", via: "bearer" });
-  });
-
-  it("still accepts a token that is old but not expired", async () => {
-    ctx = await createTestApp();
-    const token = await ctx.issuer.nativeToken("bob");
-    ctx.clock.now += 30 * 60_000;
-    expect((await me(ctx, token)).statusCode).toBe(200);
-  });
-
-  it.each([
-    ["the web client's audience", { aud: WEB_CLIENT }],
-    ["another client's audience", { aud: "moli-other-app" }],
-    ["a wrong issuer", { iss: "https://evil.example.com" }],
-    ["an expired token", { exp: NOW_SECONDS - 3600 }],
-    ["an issue time in the future", { iat: NOW_SECONDS + 3600 }],
-    ["no username", { preferred_username: undefined }],
-  ])("refuses %s", async (_name, extra) => {
-    ctx = await createTestApp();
-    expect((await me(ctx, await ctx.issuer.nativeToken("bob", extra))).statusCode).toBe(401);
-  });
-
-  it("refuses a token signed by someone else, a tampered token and garbage", async () => {
-    ctx = await createTestApp();
-    const forged = await ctx.issuer.nativeToken("bob", {}, { rogue: true });
-    const good = await ctx.issuer.nativeToken("bob");
-    const [header, payload, signature] = good.split(".") as [string, string, string];
-    const claims = JSON.parse(Buffer.from(payload, "base64url").toString()) as object;
-    const edited = Buffer.from(JSON.stringify({ ...claims, preferred_username: "alice" })).toString(
-      "base64url"
-    );
-    for (const token of [forged, `${header}.${edited}.${signature}`, "not-a-token", `${good}x`]) {
-      expect((await me(ctx, token)).statusCode).toBe(401);
+    const idToken = await ctx.issuer.lastIdToken();
+    expect(callback.statusCode).toBe(302);
+    for (const authorization of [`Bearer ${idToken}`, "Bearer garbage", "Basic abc"]) {
+      const res = await ctx.app.inject({
+        method: "GET",
+        url: "/api/v1/me",
+        headers: { authorization },
+      });
+      expect(res.statusCode).toBe(401);
     }
   });
 
-  it("refuses a token using an algorithm outside the allow list", async () => {
-    ctx = await createTestApp();
-    const token = await ctx.issuer.sign(ctx.issuer.claimsFor("bob", NATIVE_CLIENT), {
-      alg: "RS384",
-    });
-    expect((await me(ctx, token)).statusCode).toBe(401);
-  });
-
-  it("refuses a malformed Authorization header", async () => {
-    ctx = await createTestApp();
-    const res = await ctx.app.inject({
-      method: "GET",
-      url: "/api/v1/me",
-      headers: { authorization: "Basic abc" },
-    });
-    expect(res.statusCode).toBe(401);
-  });
-
-  it("judges a request on its token alone, ignoring a valid session cookie", async () => {
+  it("leaves the session cookie in charge when a header is also present", async () => {
     ctx = await createTestApp();
     const { cookie } = await ctx.signIn("alice");
     const res = await ctx.app.inject({
@@ -296,40 +251,53 @@ describe("desktop bearer token", () => {
       cookies: cookie,
       headers: { authorization: "Bearer garbage" },
     });
-    expect(res.statusCode).toBe(401);
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ username: "alice", via: "session" });
   });
 
-  it("does not accept the token as a browser session", async () => {
+  it("does not accept an ID token as a browser session", async () => {
     ctx = await createTestApp();
-    const token = await ctx.issuer.nativeToken("bob");
+    await ctx.signIn("bob");
     const res = await ctx.app.inject({
       method: "GET",
       url: "/api/v1/me",
-      cookies: { "__Host-todo_session": token },
+      cookies: { "__Host-todo_session": await ctx.issuer.lastIdToken() },
     });
     expect(res.statusCode).toBe(401);
+  });
+});
+
+describe("ID token verification", () => {
+  it("refuses a token using an algorithm outside the allow list", async () => {
+    ctx = await createTestApp();
+    ctx.issuer.state.signWithAlg = "RS384";
+    const { callback, session } = await ctx.signIn();
+    expect(callback.statusCode).toBe(400);
+    expect(session).toBeUndefined();
   });
 
   it("refreshes the key set for an unknown key at most once a minute (no amplification)", async () => {
     ctx = await createTestApp();
     const fetches = () => ctx.issuer.requests.filter((path) => path === "/jwks.json").length;
-    expect((await me(ctx, await ctx.issuer.nativeToken("bob"))).statusCode).toBe(200);
+    expect((await ctx.signIn()).callback.statusCode).toBe(302);
     expect(fetches()).toBe(1);
-    const rogue = await ctx.issuer.nativeToken("bob", {}, { rogue: true });
-    expect((await me(ctx, rogue)).statusCode).toBe(401);
-    expect((await me(ctx, rogue)).statusCode).toBe(401);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      ctx.issuer.state.signWithRogueKey = true;
+      expect((await ctx.signIn()).callback.statusCode).toBe(400);
+    }
     expect(fetches()).toBe(1);
     ctx.clock.now += 2 * 60_000;
-    expect((await me(ctx, rogue)).statusCode).toBe(401);
+    ctx.issuer.state.signWithRogueKey = true;
+    expect((await ctx.signIn()).callback.statusCode).toBe(400);
     expect(fetches()).toBe(2);
   });
 
   it("picks up a rotated signing key by refreshing the key set", async () => {
     ctx = await createTestApp();
-    expect((await me(ctx, await ctx.issuer.nativeToken("bob"))).statusCode).toBe(200);
+    expect((await ctx.signIn()).callback.statusCode).toBe(302);
     await ctx.issuer.state.rotate();
     ctx.clock.now += 2 * 60_000;
-    expect((await me(ctx, await ctx.issuer.nativeToken("bob"))).statusCode).toBe(200);
+    expect((await ctx.signIn()).callback.statusCode).toBe(302);
   });
 });
 
