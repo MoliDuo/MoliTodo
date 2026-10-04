@@ -7,7 +7,7 @@ const KEY_ID = Buffer.from("0123456789abcdef", "hex").subarray(0, 8);
 function makeKey() {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
   const raw = Buffer.from(publicKey.export({ format: "jwk" }).x as string, "base64url");
-  const pubText = `untrusted comment: minisign public key: 0123456789ABCDEF\n${Buffer.concat([Buffer.from("Ed"), KEY_ID, raw]).toString("base64")}\n`;
+  const pubText = `untrusted comment: test public key\n${Buffer.concat([Buffer.from("Ed"), KEY_ID, raw]).toString("base64")}\n`;
   return { privateKey, pubkey: Buffer.from(pubText).toString("base64") };
 }
 
