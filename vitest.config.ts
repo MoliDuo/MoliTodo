@@ -17,6 +17,7 @@ export default defineConfig({
       },
       {
         resolve: { alias },
+        define: { __APP_VERSION__: JSON.stringify("0.0.0-test") },
         test: { name: "web", include: ["web/**/*.test.{ts,tsx}"], environment: "jsdom" },
       },
     ],
@@ -31,7 +32,7 @@ export default defineConfig({
         "web/src/main.tsx",
       ],
       // The floor only goes up (standard 004, 4.4.2): raise it when coverage rises.
-      thresholds: { lines: 80, functions: 80, branches: 70, statements: 80 },
+      thresholds: { lines: 90, functions: 90, branches: 85, statements: 90 },
     },
   },
 });

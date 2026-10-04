@@ -1,12 +1,14 @@
-import { CheckCircle2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { MeResponse } from "@shared/api";
 import { fetchMe, signInUrl, UnauthorizedError } from "./api";
+import { createTodoStore, type TodoStore } from "./store";
+import { TodoApp } from "./TodoApp";
 
 type State = { status: "loading" } | { status: "ready"; me: MeResponse } | { status: "error" };
 
-export function App({ fetchFn = fetch }: { fetchFn?: typeof fetch }) {
+export function App({ fetchFn = (...args) => fetch(...args) }: { fetchFn?: typeof fetch }) {
   const [state, setState] = useState<State>({ status: "loading" });
+  const [store] = useState<TodoStore>(() => createTodoStore(fetchFn));
 
   useEffect(() => {
     let cancelled = false;
@@ -23,21 +25,14 @@ export function App({ fetchFn = fetch }: { fetchFn?: typeof fetch }) {
     };
   }, [fetchFn]);
 
+  if (state.status === "ready") return <TodoApp store={store} me={state.me} />;
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 p-6">
-      <h1 className="flex items-center gap-2 text-xl font-semibold">
-        <CheckCircle2 className="text-accent" aria-hidden="true" />
-        Moli Todo
-      </h1>
+      <h1 className="text-xl font-semibold">Moli Todo</h1>
       {state.status === "loading" && <p className="text-muted">加载中…</p>}
       {state.status === "error" && (
         <p role="alert" className="text-danger">
           加载失败，请刷新页面重试。
-        </p>
-      )}
-      {state.status === "ready" && (
-        <p>
-          已登录：<strong>{state.me.name ?? state.me.username}</strong>
         </p>
       )}
     </main>

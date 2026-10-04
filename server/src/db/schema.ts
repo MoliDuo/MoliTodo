@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 /** One row per person who has signed in (standard 008, 8.5.5). The key is `preferred_username`, lower-cased. */
 export const users = sqliteTable("users", {
@@ -28,3 +28,28 @@ export const oidcLogins = sqliteTable("oidc_logins", {
   next: text("next").notNull(),
   expiresAt: integer("expires_at").notNull(),
 });
+
+/**
+ * One row per task. A deleted task stays as a marker (`deleted`) so other devices drop it too (standard 009, 9.7.4).
+ * `seq` is a per-owner counter that goes up on every change; it is the cursor clients pull by.
+ */
+export const tasks = sqliteTable(
+  "tasks",
+  {
+    owner: text("owner").notNull(),
+    id: text("id").notNull(),
+    text: text("text").notNull(),
+    done: integer("done", { mode: "boolean" }).notNull(),
+    doneAt: integer("done_at"),
+    archived: integer("archived", { mode: "boolean" }).notNull(),
+    duration: integer("duration").notNull(),
+    position: text("position").notNull(),
+    deleted: integer("deleted", { mode: "boolean" }).notNull(),
+    version: integer("version").notNull(),
+    seq: integer("seq").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.owner, table.id] }),
+    index("tasks_owner_seq").on(table.owner, table.seq),
+  ]
+);

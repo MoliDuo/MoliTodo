@@ -8,13 +8,14 @@
 [![release](https://img.shields.io/github/v/release/MoliDuo/MoliTodo)](https://github.com/MoliDuo/MoliTodo/releases)
 ![license](https://img.shields.io/badge/license-All%20rights%20reserved-lightgrey)
 
-> 重写进行中：目前完成了服务端、统一登录和网页的最小页面；任务同步、桌面端、安装包按 [docs/architecture.md](docs/architecture.md) 里的步骤陆续加入。旧的 Electron 版（哞哞清单）在 [v1.0.7](https://github.com/MoliDuo/MoliTodo/releases/tag/v1.0.7) 之前的发布里，不再维护。
+> 重写进行中：目前完成了服务端、统一登录、任务同步和网页版；桌面端、安装包按 [docs/architecture.md](docs/architecture.md) 里的步骤陆续加入。旧的 Electron 版（哞哞清单）在 [v1.0.7](https://github.com/MoliDuo/MoliTodo/releases/tag/v1.0.7) 之前的发布里，不再维护。
 
 ## 功能
 
-- 网页版：打开 <https://todo.xiangyu.pro> 使用。
+- 网页版：打开 <https://todo.xiangyu.pro> 使用：添加、勾选、修改、删除、拖动排序，已完成视图按天分组并可记耗时。
+- 导入：设置里可以导入旧版哞哞清单的历史任务（只添加，重复导入会跳过）。
 - 桌面版（规划中）：Windows 和 macOS 的桌面浮窗，离线可用，联网后同步。
-- 同步（规划中）：多台设备、网页和桌面之间保持一致，以服务器为准。
+- 同步：多台设备、网页和桌面之间保持一致，冲突时以服务器为准，被覆盖的内容可以找回。
 
 ## 安装或访问
 

@@ -7,7 +7,10 @@ import { LoginStore, SessionStore } from "./auth/stores.js";
 import type { Config } from "./config.js";
 import type { Db } from "./db/client.js";
 import { authRoutes } from "./routes/auth.js";
+import { taskRoutes } from "./routes/tasks.js";
 import { webRoutes } from "./routes/web.js";
+import { minClientVersionGuard } from "./client-version.js";
+import { TaskStore } from "./tasks/store.js";
 import { meResponseSchema } from "@shared/api";
 
 export interface AppDeps {
@@ -46,6 +49,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.addHook("onRequest", async (request) => {
     request.auth = await authenticate(request, { oidc, sessions });
   });
+  app.addHook("preHandler", minClientVersionGuard(config.MIN_CLIENT_VERSION));
   app.addHook("preHandler", originGuard(config.APP_URL));
   app.addHook("onSend", async (_request, reply) => {
     reply.header("x-content-type-options", "nosniff");
@@ -79,6 +83,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       via: request.auth?.via,
     })
   );
+
+  taskRoutes(app, new TaskStore(db));
 
   deps.extend?.(app);
   webRoutes(app, config.WEB_DIST);
