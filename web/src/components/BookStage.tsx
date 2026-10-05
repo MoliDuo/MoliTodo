@@ -95,10 +95,77 @@ const FaceView = memo(
   (a, b) => a.side === b.side && a.render === b.render && sameFace(a.face, b.face)
 );
 
+/**
+ * A face's contents on a layer of their own while the page turns, so they are drawn once and each frame only
+ * moves and cuts that picture. The cut has to be on the element around it: a clip on the layer itself would
+ * have the contents drawn again whenever it changes, that is every frame.
+ */
+function Layer({ children }: { children: ReactNode }) {
+  return <div style={{ position: "absolute", inset: 0, willChange: "transform" }}>{children}</div>;
+}
+
 /** Angles round the roll, from its top (where the back lies flat again) to its outer edge. */
 const ROLL_STOPS = Array.from({ length: 9 }, (_, i) => Math.PI - (i * Math.PI) / 16);
 /** Across the inside of the roll, from where it leaves the page to its outer edge (0 to 1). */
 const INSIDE_STOPS = [0, 0.5, 0.75, 0.9, 1];
+/** The soft shadow is drawn at this fraction of the page's size and stretched back up. */
+const SHADOW_SCALE = 0.25;
+/** Room round the pages for the soft shadow to spread into (px). */
+const SHADOW_MARGIN = 24;
+
+/**
+ * The soft shadow the lifted part casts, just round its edges. It is blurred on a small canvas and stretched to
+ * size: an SVG or CSS blur would be worked out afresh at full size on every frame of a turn.
+ */
+function SoftShadow({ c, w, h }: { c: Curl; w: number; h: number }) {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const width = Math.ceil((2 * w + 2 * SHADOW_MARGIN) * SHADOW_SCALE);
+  const height = Math.ceil((h + 2 * SHADOW_MARGIN) * SHADOW_SCALE);
+  const lift = Math.sin(Math.PI * c.progress);
+  useLayoutEffect(() => {
+    if (typeof CanvasRenderingContext2D === "undefined") return;
+    const context = canvas.current?.getContext("2d");
+    if (!context) return;
+    const blur = 1.5 + c.radius * 0.12 + 4 * lift;
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.clearRect(0, 0, width, height);
+    // Only the shadow is wanted: the shape itself goes well off the canvas and its shadow is thrown back.
+    const away = 2 * width;
+    context.setTransform(
+      SHADOW_SCALE,
+      0,
+      0,
+      SHADOW_SCALE,
+      (w + SHADOW_MARGIN) * SHADOW_SCALE - away,
+      (SHADOW_MARGIN + 1 + c.radius * 0.1 + 2 * lift) * SHADOW_SCALE
+    );
+    context.shadowOffsetX = away;
+    context.shadowBlur = 2 * blur * SHADOW_SCALE;
+    // Solid here, faded as a whole below, so where the parts overlap it is no darker.
+    context.shadowColor = "#000";
+    for (const area of [c.flap, ...c.strips.filter((s) => s.face === "back").map((s) => s.area)]) {
+      context.beginPath();
+      area.forEach((q, i) => (i === 0 ? context.moveTo(q.x, q.y) : context.lineTo(q.x, q.y)));
+      context.fill();
+    }
+  });
+  return (
+    <canvas
+      ref={canvas}
+      className="pointer-events-none absolute"
+      width={width}
+      height={height}
+      style={{
+        left: -w - SHADOW_MARGIN,
+        top: -SHADOW_MARGIN,
+        width: width / SHADOW_SCALE,
+        height: height / SHADOW_SCALE,
+        opacity: 0.2 + 0.1 * lift,
+      }}
+      aria-hidden="true"
+    />
+  );
+}
 
 /** Gradient stops along the roll, from where it starts to its outer edge. */
 const stops = (color: string, list: { offset: number; opacity: number }[]) =>
@@ -130,7 +197,6 @@ function Shading({
   const r = c.radius;
   const middle = { x: (c.fold[0].x + c.fold[1].x) / 2, y: (c.fold[0].y + c.fold[1].y) / 2 };
   const reach = Math.max(1, Math.hypot(point.x - middle.x, point.y - middle.y));
-  const lift = Math.sin(Math.PI * c.progress);
   // The roll's outer edge, where the page underneath starts to show.
   const edge = { x: c.roll.x + n.x * r, y: c.roll.y + n.y * r };
   const across = { x1: c.roll.x, y1: c.roll.y, x2: edge.x, y2: edge.y };
@@ -175,21 +241,8 @@ function Shading({
             <stop offset="0.35" stopColor="#000" stopOpacity={0.12 * strength} />
             <stop offset="1" stopColor="#000" stopOpacity="0" />
           </linearGradient>
-          <filter id={`${id}-blur`} x="-20%" y="-20%" width="140%" height="140%">
-            <feGaussianBlur stdDeviation={1.5 + r * 0.12 + 4 * lift} />
-          </filter>
         </defs>
         <polygon points={pointsAttr(c.uncovered)} fill={`url(#${id}-under)`} />
-        <g
-          filter={`url(#${id}-blur)`}
-          opacity={0.2 + 0.1 * lift}
-          transform={`translate(0 ${1 + r * 0.1 + 2 * lift})`}
-        >
-          <polygon points={pointsAttr(c.flap)} />
-          {back.map((s, i) => (
-            <polygon key={i} points={pointsAttr(s.area)} />
-          ))}
-        </g>
       </>
     );
   } else if (layer === "inside") {
@@ -254,7 +307,7 @@ function Shading({
       </>
     );
   }
-  return (
+  const picture = (
     <svg
       className="pointer-events-none absolute top-0 overflow-visible"
       style={{ left: -w }}
@@ -265,6 +318,14 @@ function Shading({
     >
       {content}
     </svg>
+  );
+  return layer === "under" ? (
+    <>
+      {picture}
+      <SoftShadow c={c} w={w} h={h} />
+    </>
+  ) : (
+    picture
   );
 }
 
@@ -648,11 +709,13 @@ export function BookStage({
         )}
         data-face="roll"
       >
-        <FaceView
-          face={strip.face === "front" ? front : back}
-          side={strip.face === "front" ? turn.side : backSide}
-          render={renderFace}
-        />
+        <Layer>
+          <FaceView
+            face={strip.face === "front" ? front : back}
+            side={strip.face === "front" ? turn.side : backSide}
+            render={renderFace}
+          />
+        </Layer>
       </div>
     );
 
@@ -692,16 +755,18 @@ export function BookStage({
         >
           <FaceView face={faces.right} side="right" render={renderFace} />
         </div>
-        {turn && front && !c && (
-          <div style={pageBox(frontLeft)}>
-            <FaceView face={front} side={turn.side} render={renderFace} />
+        {turn && front && (
+          <div
+            style={{ ...pageBox(frontLeft), clipPath: c ? polygonCss(c.front) : undefined }}
+            data-face={c ? "front" : undefined}
+          >
+            <Layer>
+              <FaceView face={front} side={turn.side} render={renderFace} />
+            </Layer>
           </div>
         )}
         {turn && front && back && c && pointOnStage && (
           <>
-            <div style={{ ...pageBox(frontLeft), clipPath: polygonCss(c.front) }} data-face="front">
-              <FaceView face={front} side={turn.side} render={renderFace} />
-            </div>
             <Shading c={c} w={w} h={h} point={pointOnStage} layer="under" />
             {c.strips.slice(0, 1).map(roll)}
             <Shading c={c} w={w} h={h} point={pointOnStage} layer="inside" />
@@ -711,7 +776,9 @@ export function BookStage({
               style={placed(matrixCss(c.backMatrix), polygonCss(c.backClip))}
               data-face="back"
             >
-              <FaceView face={back} side={backSide} render={renderFace} />
+              <Layer>
+                <FaceView face={back} side={backSide} render={renderFace} />
+              </Layer>
             </div>
             <Shading c={c} w={w} h={h} point={pointOnStage} layer="over" />
           </>
