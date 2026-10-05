@@ -9,9 +9,6 @@ import {
   matrixCss,
   pointsAttr,
   polygonCss,
-  ROLL_STRIPS,
-  rollRadius,
-  squash,
   turnedPoint,
   type Point,
 } from "./page-curl";
@@ -71,16 +68,10 @@ describe("curl", () => {
     expect(curl({ x: W, y: H }, "bottom", "right", W, H)).toBeNull();
   });
 
-  it("splits the page into a flat part, a roll and a lifted part that add up to the page", () => {
+  it("splits the page into a flat part and a lifted part that add up to the page", () => {
     const c = curl({ x: 180, y: 330 }, "bottom", "right", W, H)!;
-    expect(c.radius).toBeGreaterThan(0);
-    expect(c.strips).toHaveLength(1 + ROLL_STRIPS);
-    const total =
-      area(c.front) + area(c.backClip) + c.strips.reduce((sum, s) => sum + area(s.clip), 0);
-    // The roll's slices overlap a little on screen (more before squeezing) so no hairline shows.
-    expect(total).toBeGreaterThanOrEqual(W * H - 1e-6);
-    expect(total).toBeLessThan(W * H + (ROLL_STRIPS + 1) * 7.5 * Math.hypot(W, H));
-    expect(area(c.flap)).toBeCloseTo(area(c.backClip));
+    expect(area(c.front) + area(c.backClip)).toBeCloseTo(W * H);
+    expect(area(c.flap)).toBeCloseTo(area(c.uncovered));
     expect(c.progress).toBeGreaterThan(0);
     expect(c.progress).toBeLessThan(1);
   });
@@ -92,34 +83,9 @@ describe("curl", () => {
     close(apply(c.backMatrix, { x: 0, y: H }), p);
   });
 
-  it("rolls the lifted part round a cylinder, each slice meeting the next", () => {
-    const c = curl({ x: 150, y: 350 }, "bottom", "right", W, H)!;
-    const r = c.radius;
-    const n = c.normal;
-    expect(r).toBeGreaterThan(0);
-    // A point s past the roll's start, on the line through the roll point; a right page's stage is canonical.
-    const at = (s: number) => ({ x: c.roll.x + n.x * s, y: c.roll.y + n.y * s });
-    const behind = (q: Point) => ({ x: W - q.x, y: q.y });
-    const [inside, ...slices] = c.strips;
-    expect(inside!.face).toBe("front");
-    close(apply(inside!.matrix, at(0)), at(0));
-    close(apply(inside!.matrix, at((Math.PI * r) / 2)), at(r));
-    slices.forEach((slice, i) => {
-      expect(slice.face).toBe("back");
-      const a = Math.PI / 2 + (i * Math.PI) / 2 / ROLL_STRIPS;
-      const b = a + Math.PI / 2 / ROLL_STRIPS;
-      close(apply(slice.matrix, behind(at(r * a))), at(r * Math.sin(a)));
-      close(apply(slice.matrix, behind(at(r * b))), at(r * Math.sin(b)));
-    });
-    // Past the roll the back lies flat, starting where the last slice ends.
-    close(apply(c.backMatrix, behind(at(Math.PI * r))), at(0));
-  });
-
   it("puts a fully turned right page flat on the left", () => {
     const c = curl(turnedPoint("bottom", W, H), "bottom", "right", W, H)!;
     expect(c.progress).toBeCloseTo(1);
-    expect(c.radius).toBe(0);
-    expect(c.strips.every((s) => s.clip.length === 0 && s.area.length === 0)).toBe(true);
     close(apply(c.backMatrix, { x: 0, y: 0 }), { x: -W, y: 0 });
     close(apply(c.backMatrix, { x: W, y: H }), { x: 0, y: H });
     expect(area(c.front)).toBeCloseTo(0);
@@ -152,26 +118,7 @@ describe("curl", () => {
   });
 });
 
-describe("rollRadius", () => {
-  it("is nothing while the page lies nearly flat, and most half way over", () => {
-    expect(rollRadius(100, 0, W)).toBe(0);
-    expect(rollRadius(2 * W, 1, W)).toBe(0);
-    expect(rollRadius(W, 0.5, W)).toBeCloseTo(36);
-    expect(rollRadius(W, 0.5, 50)).toBeCloseTo(14);
-    expect(rollRadius(W, 0.5, 1000)).toBeCloseTo(48);
-  });
-  it("never keeps the corner on the roll", () => {
-    expect(rollRadius(30, 0.5, W)).toBeCloseTo(30 / Math.PI);
-  });
-});
-
 describe("helpers", () => {
-  it("squashes along a line, and reflects across it", () => {
-    const n = { x: 0, y: 1 };
-    close(apply(squash({ x: 0, y: 10 }, n, 0.5, 2), { x: 3, y: 30 }), { x: 3, y: 22 });
-    close(apply(squash({ x: 0, y: 10 }, n, -1, 0), { x: 3, y: 30 }), { x: 3, y: -10 });
-  });
-
   it("composes matrices like functions", () => {
     const move = [1, 0, 0, 1, 5, 0] as const;
     const double = [2, 0, 0, 2, 0, 0] as const;
@@ -190,6 +137,5 @@ describe("helpers", () => {
     close(arcPoint(from, to, 0, 50), from);
     close(arcPoint(from, to, 1, 50), to);
     expect(arcPoint(from, to, 0.4, 50).y).toBeLessThan(400);
-    close(arcPoint(from, to, 0.5, 0), { x: 0, y: 400 });
   });
 });

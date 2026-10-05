@@ -435,19 +435,9 @@ describe("BookStage turning, one page", () => {
   });
 
   it("turns with the arrow and page keys, but not while typing", async () => {
-    await book("#/book?day=2026-10-02");
+    await book("#/book?day=2026-10-03");
     fireEvent.keyDown(document.body, { key: "ArrowRight" });
-    // A second key while the page is still turning turns the next one straight after.
-    fireEvent.keyDown(document.body, { key: "ArrowRight" });
-    flush();
-    expect(hash()).toBe("#/book?day=2026-10-03");
-    expect(face("back")).toBeNull();
-    expect(frames.size).toBe(1);
-    settleAll();
-    expect(hash()).toBe("#/book?day=2026-10-04");
-    // Only the last key waits: the other way, it takes the place of the one before.
-    fireEvent.keyDown(document.body, { key: "ArrowLeft" });
-    fireEvent.keyDown(document.body, { key: "ArrowLeft" });
+    // A second key while the page is still turning does nothing.
     fireEvent.keyDown(document.body, { key: "ArrowRight" });
     settleAll();
     expect(hash()).toBe("#/book?day=2026-10-04");
@@ -469,39 +459,15 @@ describe("BookStage turning, one page", () => {
     input.remove();
   });
 
-  it("catches a page still turning, and carries on with it", async () => {
-    await book("#/book?day=2026-10-03");
-    fireEvent.keyDown(document.body, { key: "ArrowRight" });
-    fireEvent.keyDown(document.body, { key: "ArrowRight" });
-    flush(100);
-    expect(face("back")).not.toBeNull();
-    // Caught half way and pulled back: it lies down where it was, and the waiting turn is forgotten.
-    pointer("pointerDown", 20, 450);
-    expect(frames.size).toBe(0);
-    expect(face("back")).not.toBeNull();
-    now += 1000;
-    pointer("pointerMove", 340, 450);
-    pointer("pointerUp", 340, 450);
-    settleAll();
-    expect(hash()).toBe("#/book?day=2026-10-03");
-
-    // Caught and let go without moving: it goes on by how far over it already is.
-    fireEvent.keyDown(document.body, { key: "ArrowRight" });
-    flush(200);
-    pointer("pointerDown", 100, 450);
-    now += 1000;
-    pointer("pointerUp", 100, 450);
-    settleAll();
-    expect(hash()).toBe("#/book?day=2026-10-04");
-  });
-
-  it("catches a page before its first frame", async () => {
+  it("does not take a new drag while a page is still turning", async () => {
     await book("#/book?day=2026-10-03");
     fireEvent.keyDown(document.body, { key: "ArrowRight" });
     pointer("pointerDown", 300, 450);
-    pointer("pointerUp", 300, 450);
+    pointer("pointerMove", 335, 512, { type: "mouse" });
+    now += 1000;
+    pointer("pointerMove", 100, 450);
     settleAll();
-    expect(hash()).toBe("#/book?day=2026-10-03");
+    expect(hash()).toBe("#/book?day=2026-10-04");
   });
 
   it("stops the animation when the book goes away", async () => {
@@ -515,34 +481,16 @@ describe("BookStage turning, one page", () => {
   it("lifts the corner under a mouse, and turns from there", async () => {
     await book("#/book?day=2026-10-03");
     pointer("pointerMove", 335, 512, { type: "mouse" });
-    settleAll();
     expect(face("back")).not.toBeNull();
-    // Moving away, the corner settles back down rather than vanishing.
     pointer("pointerMove", 150, 200, { type: "mouse" });
-    flush(16);
-    expect(face("back")).not.toBeNull();
-    settleAll();
     expect(face("back")).toBeNull();
     pointer("pointerMove", 150, 200, { type: "mouse" });
     pointer("pointerMove", 150, 200, { type: "touch" });
 
     pointer("pointerMove", 335, 512, { type: "mouse" });
-    flush(16);
-    pointer("pointerMove", 330, 505, { type: "mouse" });
     fireEvent.pointerLeave(stage());
-    settleAll();
     expect(face("back")).toBeNull();
     fireEvent.pointerLeave(stage());
-
-    // A tap on a lifted corner turns the page on from there.
-    pointer("pointerMove", 335, 512, { type: "mouse" });
-    settleAll();
-    tap(335, 512, { type: "mouse" });
-    settleAll();
-    expect(hash()).toBe("#/book?day=2026-10-04");
-    fireEvent.keyDown(document.body, { key: "ArrowLeft" });
-    settleAll();
-    expect(hash()).toBe("#/book?day=2026-10-03");
 
     pointer("pointerMove", 335, 512, { type: "mouse" });
     swipe(

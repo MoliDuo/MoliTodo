@@ -161,19 +161,13 @@ export function startTurn(
 }
 
 /**
- * How the corner moves, in the turned page's canonical coordinates, for a finger moving by `delta` (stage
- * pixels, or pixels per ms). A left page sees the stage mirrored; a phone turning back moves the corner twice
- * as fast, so a swipe across the page is a full turn.
+ * The corner's place for a finger moved by `delta` (stage pixels) since the turn's point was where it is. A left
+ * page sees the stage mirrored; a phone turning back moves the corner twice as fast, so a swipe across the page
+ * is a full turn.
  */
-export const cornerDelta = (turn: Turn, delta: Point): Point => ({
-  x: turn.reverse ? delta.x * 2 : turn.side === "right" ? delta.x : -delta.x,
-  y: delta.y,
-});
-
-/** The corner's place for a finger moved by `delta` (stage pixels) since the turn's point was where it is. */
 export function dragPoint(turn: Turn, delta: Point, w: number, h: number): Point {
-  const d = cornerDelta(turn, delta);
-  return clampPoint({ x: turn.point.x + d.x, y: turn.point.y + d.y }, turn.corner, w, h);
+  const dx = turn.reverse ? delta.x * 2 : turn.side === "right" ? delta.x : -delta.x;
+  return clampPoint({ x: turn.point.x + dx, y: turn.point.y + delta.y }, turn.corner, w, h);
 }
 
 const FLICK = 0.35; // px per ms
