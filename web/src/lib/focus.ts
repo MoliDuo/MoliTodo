@@ -4,7 +4,7 @@
 import { MAX_SESSION_SECONDS, type SessionData, type TimerData } from "@shared/records";
 import { newId } from "./model";
 import type { SyncEngine, View } from "./sync";
-import { addDays, dayKey, dayParts, daysBetween, daysInMonth, keyOfDate } from "./time";
+import { addDays, dayKey, dayParts, dayStart, daysBetween, daysInMonth, keyOfDate } from "./time";
 
 export const TIMER_ID = "current";
 /** Runs shorter than this are not kept. */
@@ -78,14 +78,41 @@ export const deleteSession = (engine: SyncEngine, id: string) => engine.remove("
 export const sessions = (engine: SyncEngine): Session[] =>
   engine.all("session").sort((a, b) => b.data.startedAt - a.data.startedAt);
 
-/** Names used before, most recent first, without repeats. */
-export function recentNames(engine: SyncEngine, limit = 8): string[] {
-  const names: string[] = [];
-  for (const session of sessions(engine)) {
-    if (!names.includes(session.data.name)) names.push(session.data.name);
-    if (names.length >= limit) break;
-  }
-  return names;
+/** A session written in by hand: its name, the day and clock time it began ("HH:MM"), and how long it took. */
+export interface SessionInput {
+  name: string;
+  day: string;
+  start: string;
+  minutes: number;
+}
+
+/** Longest session written in by hand: a whole day, the same as the stopwatch. */
+export const MAX_SESSION_MINUTES = MAX_SESSION_SECONDS / 60;
+
+/**
+ * Adds a session (id null) or changes one. Returns its id, or null when the day, the time or the length (1 minute
+ * to 24 hours) does not make sense.
+ */
+export function saveSession(
+  engine: SyncEngine,
+  id: string | null,
+  input: SessionInput
+): string | null {
+  const midnight = dayStart(input.day);
+  const clock = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(input.start.trim());
+  const minutes = Math.round(input.minutes);
+  if (midnight === null || !clock || !(minutes >= 1 && minutes <= MAX_SESSION_MINUTES)) return null;
+  const startedAt = midnight + (Number(clock[1]) * 60 + Number(clock[2])) * 60_000;
+  const seconds = minutes * 60;
+  const key = id ?? newId();
+  engine.put("session", key, {
+    name: input.name.trim().slice(0, 200) || UNNAMED,
+    startedAt,
+    endedAt: startedAt + seconds * 1000,
+    seconds,
+    day: input.day,
+  });
+  return key;
 }
 
 // Statistics -------------------------------------------------------------------------------------------------

@@ -7,11 +7,14 @@ export function Sheet({
   onClose,
   children,
   wide = false,
+  actions,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
   wide?: boolean;
+  /** Buttons next to the close button. */
+  actions?: ReactNode;
 }) {
   const panel = useRef<HTMLDivElement>(null);
   // Callers pass a new arrow on every render; the focus handling below must run only on open and close,
@@ -46,6 +49,8 @@ export function Sheet({
       >
         <div className="bg-surface sticky top-0 z-10 flex items-center justify-between px-5 pt-4 pb-2">
           <h2 className="text-base font-semibold">{title}</h2>
+          <span className="flex-1" />
+          {actions}
           <button
             type="button"
             onClick={onClose}
@@ -55,7 +60,8 @@ export function Sheet({
             <X size={18} aria-hidden="true" />
           </button>
         </div>
-        <div className="px-5 pb-5">{children}</div>
+        {/* A little room on top so a focus ring on the first field is not cut off by the header. */}
+        <div className="px-5 pt-1 pb-5">{children}</div>
       </div>
     </div>
   );

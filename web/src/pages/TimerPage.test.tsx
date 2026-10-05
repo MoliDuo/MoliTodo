@@ -32,10 +32,11 @@ const savedSessions = (api: ReturnType<typeof createFakeApi>) =>
 const lookAgain = () => act(() => void document.dispatchEvent(new Event("visibilitychange")));
 
 describe("TimerPage name picker", () => {
-  it("offers today's written tasks without their tags, and recent names", async () => {
+  it("offers today's written to-dos without their tags, and no list of recent names", async () => {
     const api = createFakeApi();
     seedTask(api, TODAY, "R 21-1-3 #阅读", { indent: 1, done: true });
     seedTask(api, TODAY, "   ");
+    seedTask(api, TODAY, "随手记一笔", { mark: "dot" });
     seedTask(api, TODAY, "#只有标签");
     seedTask(api, "2026-10-03", "昨天的事");
     seedSession(api, "单词", "2026-10-02", 600);
@@ -51,24 +52,15 @@ describe("TimerPage name picker", () => {
       .getAllByRole("button")
       .map((button) => button.textContent);
     expect(names).toEqual(["R 21-1-3", "#只有标签"]);
-    const recent = within(dialog).getByText("最近用过").closest("section") as HTMLElement;
-    expect(
-      within(recent)
-        .getAllByRole("button")
-        .map((button) => button.textContent)
-    ).toEqual(["单词", "小作文"]);
+    expect(within(dialog).queryByText("最近用过")).toBeNull();
 
     fireEvent.click(within(tasks).getByRole("button", { name: "R 21-1-3" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(picker().textContent).toContain("R 21-1-3");
 
     fireEvent.click(picker());
-    fireEvent.click(screen.getByRole("button", { name: "小作文" }));
-    expect(picker().textContent).toContain("小作文");
-
-    fireEvent.click(picker());
     const input = screen.getByRole("textbox", { name: "专注任务名" }) as HTMLInputElement;
-    expect(input.value).toBe("小作文");
+    expect(input.value).toBe("R 21-1-3");
     fireEvent.change(input, { target: { value: "  背单词  " } });
     fireEvent.click(screen.getByRole("button", { name: "好" }));
     expect(picker().textContent).toContain("背单词");

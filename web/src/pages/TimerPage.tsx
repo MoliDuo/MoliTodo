@@ -11,12 +11,11 @@ import {
   isStarted,
   MIN_SESSION_SECONDS,
   pauseTimer,
-  recentNames,
   sessions,
   setTimerName,
   startTimer,
 } from "../lib/focus";
-import { isWritten, tasksOfDay } from "../lib/model";
+import { isTodo, isWritten, tasksOfDay } from "../lib/model";
 import { formatLong, formatStopwatch } from "../lib/time";
 import { navigate } from "../router";
 
@@ -27,8 +26,7 @@ function NamePicker({ onClose }: { onClose: () => void }) {
   const { engine, today } = useApp();
   const timer = getTimer(engine);
   const [draft, setDraft] = useState(timer.name);
-  const todays = tasksOfDay(engine, today).filter(isWritten);
-  const recent = recentNames(engine);
+  const todays = tasksOfDay(engine, today).filter((task) => isWritten(task) && isTodo(task));
   const choose = (name: string) => {
     setTimerName(engine, name);
     onClose();
@@ -55,7 +53,7 @@ function NamePicker({ onClose }: { onClose: () => void }) {
         </button>
       </form>
       {todays.length > 0 && (
-        <section className="mb-5">
+        <section>
           <h3 className="text-muted mb-1.5 text-xs">今天的任务</h3>
           <ul>
             {todays.map((task) => (
@@ -63,7 +61,7 @@ function NamePicker({ onClose }: { onClose: () => void }) {
                 <button
                   type="button"
                   onClick={() => choose(nameOf(task.data.text))}
-                  className={`hover:bg-surface-2 w-full rounded-lg px-2 py-2 text-left text-[15px] ${
+                  className={`hover:bg-surface-2 w-full rounded-lg px-2 py-2 text-left text-[length:var(--list-size)] leading-[var(--list-leading)] ${
                     task.data.done ? "text-muted" : ""
                   }`}
                   style={{ paddingLeft: 8 + task.data.indent * 16 }}
@@ -73,23 +71,6 @@ function NamePicker({ onClose }: { onClose: () => void }) {
               </li>
             ))}
           </ul>
-        </section>
-      )}
-      {recent.length > 0 && (
-        <section>
-          <h3 className="text-muted mb-2 text-xs">最近用过</h3>
-          <div className="flex flex-wrap gap-2">
-            {recent.map((name) => (
-              <button
-                key={name}
-                type="button"
-                onClick={() => choose(name)}
-                className="bg-surface-2 hover:bg-border rounded-full px-3 py-1.5 text-sm"
-              >
-                {name}
-              </button>
-            ))}
-          </div>
         </section>
       )}
     </Sheet>

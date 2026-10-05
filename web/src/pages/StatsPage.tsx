@@ -1,4 +1,4 @@
-import { ArrowLeft, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, Pencil, Plus, Trash2 } from "lucide-react";
 import { useId, useMemo, useState, type ReactNode } from "react";
 import type { SessionData } from "@shared/records";
 import { Sheet } from "../components/Sheet";
@@ -6,6 +6,8 @@ import { useApp } from "../context";
 import { minuteTicks, polar, slicePath, smoothPath, SLICE_COLORS } from "../lib/chart";
 import {
   deleteSession,
+  MAX_SESSION_MINUTES,
+  saveSession,
   distribution,
   monthSeries,
   rangeOf,
@@ -17,7 +19,16 @@ import {
   type RangeKind,
   type Slice,
 } from "../lib/focus";
-import { dayParts, formatClock, formatFullDay, formatLong, formatMonthDay } from "../lib/time";
+import {
+  dayKey,
+  dayParts,
+  formatClock,
+  formatDuration,
+  formatFullDay,
+  formatLong,
+  formatMonthDay,
+  parseDuration,
+} from "../lib/time";
 import { navigate } from "../router";
 
 const RANGES: { kind: RangeKind; label: string }[] = [
@@ -261,6 +272,105 @@ function AreaChart({ points, labelEvery }: { points: Point[]; labelEvery: number
   );
 }
 
+const field =
+  "bg-surface-2 focus:ring-accent w-full min-w-0 rounded-lg px-3 py-2 text-sm outline-none focus:ring-1";
+
+/** Writes in a session by hand, or changes one: name, day, when it began and how long it took. */
+function SessionForm({
+  session,
+  onDone,
+}: {
+  session: { id: string; data: SessionData } | null;
+  onDone: () => void;
+}) {
+  const { engine, now } = useApp();
+  const [name, setName] = useState(session?.data.name ?? "");
+  const [day, setDay] = useState(session?.data.day ?? dayKey(now));
+  const [start, setStart] = useState(formatClock(session?.data.startedAt ?? now));
+  const [length, setLength] = useState(
+    session ? formatDuration(Math.round(session.data.seconds / 60)) : ""
+  );
+  const [problem, setProblem] = useState<string | null>(null);
+
+  const save = () => {
+    const minutes = parseDuration(length);
+    if (minutes === null || minutes < 1 || minutes > MAX_SESSION_MINUTES)
+      return setProblem("用时写成 25min、1h20min 这样，1 分钟到 24 小时");
+    if (!saveSession(engine, session?.id ?? null, { name, day, start, minutes }))
+      return setProblem("日期或开始时间不对");
+    onDone();
+  };
+
+  return (
+    <Sheet title={session ? "修改记录" : "添加记录"} onClose={onDone}>
+      <form
+        className="space-y-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          save();
+        }}
+      >
+        <label className="block">
+          <span className="text-muted mb-1 block text-xs">名称</span>
+          <input
+            value={name}
+            autoFocus={!session}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="比如 单词"
+            className={field}
+          />
+        </label>
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block">
+            <span className="text-muted mb-1 block text-xs">日期</span>
+            <input
+              type="date"
+              value={day}
+              onChange={(event) => setDay(event.target.value)}
+              className={field}
+            />
+          </label>
+          <label className="block">
+            <span className="text-muted mb-1 block text-xs">开始时间</span>
+            <input
+              type="time"
+              value={start}
+              onChange={(event) => setStart(event.target.value)}
+              className={field}
+            />
+          </label>
+        </div>
+        <label className="block">
+          <span className="text-muted mb-1 block text-xs">用时</span>
+          <input
+            value={length}
+            inputMode="text"
+            onChange={(event) => {
+              setLength(event.target.value);
+              setProblem(null);
+            }}
+            placeholder="25min、1h20min"
+            className={field}
+          />
+        </label>
+        {problem && <p className="text-danger text-xs">{problem}</p>}
+        <div className="flex justify-end gap-2 pt-1">
+          <button
+            type="button"
+            onClick={onDone}
+            className="text-muted rounded-lg px-4 py-2 text-sm"
+          >
+            取消
+          </button>
+          <button type="submit" className="bg-accent text-accent-fg rounded-lg px-5 py-2 text-sm">
+            保存
+          </button>
+        </div>
+      </form>
+    </Sheet>
+  );
+}
+
 function SessionList({
   list,
   onClose,
@@ -269,12 +379,31 @@ function SessionList({
   onClose: () => void;
 }) {
   const { engine, today } = useApp();
+  // The form takes the list's place while it is open, so Esc closes one at a time.
+  const [editing, setEditing] = useState<{ id: string; data: SessionData } | "new" | null>(null);
+  if (editing)
+    return (
+      <SessionForm session={editing === "new" ? null : editing} onDone={() => setEditing(null)} />
+    );
   return (
-    <Sheet title="专注记录" onClose={onClose}>
+    <Sheet
+      title="专注记录"
+      onClose={onClose}
+      actions={
+        <button
+          type="button"
+          aria-label="添加记录"
+          onClick={() => setEditing("new")}
+          className="text-accent-ink hover:bg-accent-soft rounded-full p-2"
+        >
+          <Plus size={18} aria-hidden="true" />
+        </button>
+      }
+    >
       {list.length === 0 && <p className="text-muted py-6 text-center text-sm">这段时间没有记录</p>}
       <ul className="divide-border divide-y">
         {list.map((s) => (
-          <li key={s.id} className="flex items-center gap-3 py-2.5">
+          <li key={s.id} className="flex items-center gap-2 py-2.5">
             <div className="min-w-0 flex-1">
               <p className="truncate text-[15px]">{s.data.name}</p>
               <p className="text-muted text-xs">
@@ -282,7 +411,15 @@ function SessionList({
                 {formatClock(s.data.endedAt)}
               </p>
             </div>
-            <span className="font-serif text-sm">{formatLong(s.data.seconds)}</span>
+            <span className="mr-1 font-serif text-sm">{formatLong(s.data.seconds)}</span>
+            <button
+              type="button"
+              aria-label={`修改 ${s.data.name}`}
+              onClick={() => setEditing(s)}
+              className="text-muted hover:text-text rounded-full p-1.5"
+            >
+              <Pencil size={15} aria-hidden="true" />
+            </button>
             <button
               type="button"
               aria-label={`删除 ${s.data.name}`}
