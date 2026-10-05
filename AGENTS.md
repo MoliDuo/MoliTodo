@@ -39,7 +39,7 @@ These rules apply to every Moli repository. The full standards live in the priva
 
 ## About this project
 
-Moli Todo (`MoliTodo`, id `todo`) is a to-do list that runs as a website only (there is no desktop client) and syncs between devices. One Fastify server owns the data; the website keeps its copy in memory and sends every change right away (standard 009, 9.7).
+Moli Todo (`MoliTodo`, id `todo`) is a to-do list that runs as a website only (there is no desktop client) and syncs between devices. One Fastify server owns the data; the website sends every change right away and also keeps its copy, unsent changes included, in IndexedDB so it opens offline (a deliberate departure from standard 009, 9.7, which keeps the web copy in memory only). A service worker keeps the app shell.
 
 Layout: `server/` (Fastify API, SQLite via Drizzle, sign-in), `web/` (Vite + React site), `shared/` (Zod schemas used by both server and web; web-only logic such as sync lives in `web/src/lib/`), `docs/` (Chinese docs; `docs/design/original` is the old Electron app's design mock-up, kept for visual reference only).
 

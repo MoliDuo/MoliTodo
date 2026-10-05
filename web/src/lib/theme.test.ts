@@ -53,17 +53,22 @@ describe("theme colours", () => {
   });
 
   it("puts the colours on the page", () => {
-    const meta = document.createElement("meta");
-    meta.name = "theme-color";
-    document.head.append(meta);
+    const metas = ["light", "dark"].map((scheme) => {
+      const meta = document.createElement("meta");
+      meta.name = "theme-color";
+      meta.media = `(prefers-color-scheme: ${scheme})`;
+      document.head.append(meta);
+      return meta;
+    });
     applyTheme({ accent: "#3f7d5c", theme: "dark", cover: "monet" }, false);
     expect(document.documentElement.dataset.theme).toBe("dark");
     expect(document.body.style.getPropertyValue("--moli-accent")).not.toBe("");
-    expect(meta.getAttribute("content")).toBe("#141414");
+    expect(metas.map((meta) => meta.getAttribute("content"))).toEqual(["#141414", "#141414"]);
     applyTheme({ accent: null, theme: "system", cover: "monet" }, false);
     expect(document.documentElement.dataset.theme).toBe("light");
     expect(document.body.style.getPropertyValue("--moli-accent")).toBe(DEFAULT_ACCENT);
-    meta.remove();
+    expect(metas.map((meta) => meta.getAttribute("content"))).toEqual(["#ffffff", "#ffffff"]);
+    metas.forEach((meta) => meta.remove());
   });
 
   it("gives the book's case its own colour only when one is chosen", () => {

@@ -1,6 +1,6 @@
 import { createHttpTransport } from "./lib/http-transport";
 import { createFileApi, type FileApi } from "./lib/images";
-import { SyncEngine, type Transport } from "./lib/sync";
+import { SyncEngine, type SyncState, type Transport } from "./lib/sync";
 
 export const WEB_CLIENT = `todo-web/${__APP_VERSION__}`;
 
@@ -13,13 +13,22 @@ export interface TodoStore {
   getSnapshot: () => number;
 }
 
-function createStore(transport: Transport, files: FileApi): TodoStore {
+export interface StoreOptions {
+  /** Where to start from: the copy kept on this device. */
+  state?: SyncState | null;
+  /** Called after every change, to keep the copy on this device. */
+  save?: (state: SyncState) => void;
+}
+
+function createStore(transport: Transport, files: FileApi, options: StoreOptions): TodoStore {
   const listeners = new Set<() => void>();
   let tick = 0;
   const engine = new SyncEngine({
     transport,
-    onChange: () => {
+    ...(options.state ? { state: options.state } : {}),
+    onChange: (state) => {
       tick += 1;
+      options.save?.(state);
       listeners.forEach((listener) => listener());
     },
   });
@@ -35,12 +44,16 @@ function createStore(transport: Transport, files: FileApi): TodoStore {
 }
 
 /**
- * The website keeps its copy in memory only: the browser is online whenever the page is useful, and
- * every change is sent right away (standard 009, 9.7: no offline queue on the web).
+ * Every change is sent right away. The copy is also kept on this device (`lib/local-cache.ts`), so the app
+ * opens without the network and changes made offline are sent once it is back, even after the page was closed.
  */
-export function createTodoStore(fetchFn: typeof fetch = (...args) => fetch(...args)): TodoStore {
+export function createTodoStore(
+  fetchFn: typeof fetch = (...args) => fetch(...args),
+  options: StoreOptions = {}
+): TodoStore {
   return createStore(
     createHttpTransport({ client: WEB_CLIENT, fetch: fetchFn }),
-    createFileApi(WEB_CLIENT, fetchFn)
+    createFileApi(WEB_CLIENT, fetchFn),
+    options
   );
 }

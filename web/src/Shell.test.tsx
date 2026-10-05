@@ -4,6 +4,7 @@ import { App } from "./App";
 import { fetchMe, UnauthorizedError } from "./api";
 import { useApp } from "./context";
 import { readLocal, useMediaQuery, writeLocal } from "./hooks";
+import { announceUpdate } from "./lib/app-update";
 import { Shell } from "./Shell";
 import { createTodoStore } from "./store";
 import { createFakeApi, ME } from "./test-support/fake-api";
@@ -102,6 +103,17 @@ describe("Shell banners", () => {
     renderShell(api);
     expect(await screen.findByText("版本太旧，请刷新页面")).toBeTruthy();
     expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("offers a new version once it is downloaded, and switches only when asked", async () => {
+    renderShell(createFakeApi());
+    expect(screen.queryByText("有新版本")).toBeNull();
+    const apply = vi.fn();
+    act(() => announceUpdate(apply));
+    expect(apply).not.toHaveBeenCalled();
+    act(() => screen.getByRole("button", { name: "刷新" }).click());
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("有新版本")).toBeNull();
   });
 
   it("goes to sign-in when the session is gone", async () => {
