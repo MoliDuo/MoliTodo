@@ -7,6 +7,7 @@ import { LoginStore, SessionStore } from "./auth/stores.js";
 import type { Config } from "./config.js";
 import type { Db } from "./db/client.js";
 import { authRoutes } from "./routes/auth.js";
+import { fileRoutes } from "./routes/files.js";
 import { recordRoutes } from "./routes/records.js";
 import { webRoutes } from "./routes/web.js";
 import { minClientVersionGuard } from "./client-version.js";
@@ -84,6 +85,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   );
 
   recordRoutes(app, new RecordStore(db, now));
+  fileRoutes(app, db, now);
 
   deps.extend?.(app);
   webRoutes(app, config.WEB_DIST);

@@ -13,6 +13,13 @@ export const MAX_SESSION_SECONDS = 24 * 60 * 60;
 export const MAX_INDENT = 3;
 /** An uploaded cover, as a data URL, after the browser has shrunk it. */
 export const MAX_COVER_LENGTH = 600_000;
+/** Pictures one line can carry. */
+export const MAX_IMAGES_PER_TASK = 9;
+/** Covers she can upload; each is synced to every device, so keep them few. */
+export const MAX_UPLOADED_COVERS = 6;
+/** An uploaded picture file, after the browser has shrunk it. */
+export const MAX_FILE_BYTES = 5 * 1024 * 1024;
+export const FILE_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
 
 /** Header every client sends: `<client>/<version>`, e.g. `todo-web/3.0.0`. */
 export const CLIENT_HEADER = "x-moli-client";
@@ -33,6 +40,16 @@ const timestamp = z.number().int().min(0);
 export const HIGHLIGHTS = ["yellow", "red", "blue", "green", "purple"] as const;
 export const highlightSchema = z.enum(HIGHLIGHTS);
 export type Highlight = z.infer<typeof highlightSchema>;
+/** "fill" paints behind the words like a marker pen; "underline" draws a coloured line under them. */
+export const HIGHLIGHT_STYLES = ["fill", "underline"] as const;
+export type HighlightStyle = (typeof HIGHLIGHT_STYLES)[number];
+
+/** What starts a line: a box to tick (a to-do), or a dot or dash for a note that is never ticked. */
+export const MARKS = ["box", "dot", "dash"] as const;
+export type Mark = (typeof MARKS)[number];
+
+/** Server-made ids of uploaded files (UUIDs). */
+export const fileIdSchema = z.string().regex(/^[0-9a-f-]{36}$/);
 
 /** One line of a day's list. `#words` in the text are its tags. `indent` only moves it right; it is not a subtask. */
 export const taskDataSchema = z.object({
@@ -45,6 +62,12 @@ export const taskDataSchema = z.object({
   duration: z.number().int().min(0).max(MAX_DURATION_MINUTES).nullable(),
   highlight: highlightSchema.nullable(),
   position: positionSchema,
+  /** Missing on lines written before notes existed: those are boxes. */
+  mark: z.enum(MARKS).optional(),
+  /** Missing means "fill". */
+  highlightStyle: z.enum(HIGHLIGHT_STYLES).optional(),
+  /** Pictures attached to the line, as ids from `POST /api/v2/files`. */
+  images: z.array(fileIdSchema).max(MAX_IMAGES_PER_TASK).optional(),
 });
 export type TaskData = z.infer<typeof taskDataSchema>;
 
@@ -83,12 +106,19 @@ export const THEMES = ["system", "light", "dark"] as const;
 export const settingsDataSchema = z.object({
   accent: hexColorSchema.nullable(),
   theme: z.enum(THEMES),
-  /** A built-in cover's id, or "upload" for the picture in the `cover` record. */
+  /**
+   * A built-in cover's id, `u:<id>` for an uploaded one (a `cover` record), or "upload" for the first upload
+   * (the record with id `cover`).
+   */
   cover: z.string().min(1).max(40),
+  /** The book's case; null or missing means the theme colour. */
+  caseColor: hexColorSchema.nullable().optional(),
+  /** Built-in covers she removed from the list. */
+  hiddenCovers: z.array(z.string().min(1).max(40)).max(40).optional(),
 });
 export type SettingsData = z.infer<typeof settingsDataSchema>;
 
-/** An uploaded cover picture (id `cover`), kept apart from settings so changing the theme does not resend it. */
+/** An uploaded cover picture (one record each), kept apart from settings so changing the theme does not resend it. */
 export const coverDataSchema = z.object({
   image: z
     .string()
@@ -152,3 +182,6 @@ export const conflictResponseSchema = z.object({
   record: recordSchema.nullable(),
 });
 export type ConflictResponse = z.infer<typeof conflictResponseSchema>;
+
+/** 200 answer of `POST /api/v2/files` (the body is the picture itself). */
+export const fileResponseSchema = z.object({ id: fileIdSchema });
