@@ -9,7 +9,8 @@ import {
   type ReactNode,
 } from "react";
 import { BookStage, type StageGeometry } from "../components/BookStage";
-import { CoverPicker } from "../components/CoverPicker";
+import { Calendar } from "../components/Calendar";
+import { CaseColorPicker, CoverPicker } from "../components/CoverPicker";
 import { Sheet } from "../components/Sheet";
 import { TaskLine, type TagColors } from "../components/TaskText";
 import { useApp } from "../context";
@@ -23,7 +24,7 @@ import {
   type Layout,
 } from "../lib/book";
 import { coverSrc } from "../lib/covers";
-import { getSettings, totalMinutes, uploadedCover } from "../lib/model";
+import { getSettings, totalMinutes, uploadedCovers } from "../lib/model";
 import { dayParts, formatDuration, formatMonthDay, formatWeekday } from "../lib/time";
 import { navigate } from "../router";
 import { useTagColors } from "../useTagColors";
@@ -159,10 +160,11 @@ export function BookPage({
   const geometry = bookGeometry(size.width, size.height, layout);
   const [phase, setPhase] = useState<Phase>(routeDay ? "open" : "closed");
   const [covers, setCovers] = useState(false);
-  const [years, setYears] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const picker = useRef<HTMLDivElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const settings = getSettings(engine);
-  const src = coverSrc(settings.cover, uploadedCover(engine));
+  const src = coverSrc(settings.cover, uploadedCovers(engine), settings.hiddenCovers);
 
   const n = book.pages.length;
   const indexOfDay = (day: string | null) =>
@@ -205,7 +207,34 @@ export function BookPage({
     later(CLOSE_MS, "closed");
   };
 
+  const writtenDays = useMemo(() => new Set(book.days), [book]);
+  // The day picker closes on a tap outside it or Esc.
+  useEffect(() => {
+    if (!picking) return;
+    const away = (event: PointerEvent) => {
+      if (!picker.current?.contains(event.target as Node)) setPicking(false);
+    };
+    const esc = (event: KeyboardEvent) => event.key === "Escape" && setPicking(false);
+    document.addEventListener("pointerdown", away);
+    window.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("pointerdown", away);
+      window.removeEventListener("keydown", esc);
+    };
+  }, [picking]);
+
   const shut = phase === "closed" || phase === "closing";
+  /** Turns to a day: in this year the book opens there (with the cover turning if it was shut). */
+  const pickDay = (day: string) => {
+    setPicking(false);
+    const y = dayParts(day).year;
+    navigate({ name: "book", year: y === thisYear ? null : y, day }, y === year);
+    // Another year's book starts open at the day of the route.
+    if (y !== year || !shut) return;
+    if (reducedMotion) return setPhase("open");
+    setPhase("opening");
+    later(OPEN_MS, "open");
+  };
   // Closed, the stage is shrunk and moved so the right-hand half (the cover) sits in the upper middle.
   const caseW = geometry.w + CASE + 2;
   const caseH = geometry.h + CASE * 2;
@@ -246,34 +275,32 @@ export function BookPage({
   return (
     <div className="flex flex-col">
       <header className="mx-auto flex w-full max-w-5xl items-center justify-between px-5 pt-4 pb-2 lg:px-10">
-        <div className="relative">
+        <div className="relative" ref={picker}>
           <button
             type="button"
-            onClick={() => setYears((v) => !v)}
-            aria-expanded={years}
-            aria-label={`${year} 年，换一年`}
+            onClick={() => setPicking((v) => !v)}
+            aria-expanded={picking}
+            aria-label={`${year} 年，选一天`}
             className="flex items-center gap-1 font-serif text-[26px] font-bold"
           >
             {year}
             <ChevronDown size={16} className="text-muted mt-1" aria-hidden="true" />
           </button>
-          {years && (
-            <ul className="bg-surface border-border absolute top-full left-0 z-40 mt-1 min-w-28 rounded-xl border py-1 shadow-lg">
-              {book.years.map((y) => (
-                <li key={y}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setYears(false);
-                      navigate({ name: "book", year: y === thisYear ? null : y, day: null });
-                    }}
-                    className={`hover:bg-surface-2 w-full px-4 py-2 text-left font-serif ${y === year ? "text-accent-ink font-bold" : ""}`}
-                  >
-                    {y}
-                  </button>
-                </li>
-              ))}
-            </ul>
+          {picking && (
+            <div
+              role="dialog"
+              aria-label="选一天"
+              className="bg-surface border-border absolute top-full left-0 z-40 mt-1 w-[min(20rem,calc(100vw-2.5rem))] rounded-2xl border p-3 shadow-lg"
+            >
+              <Calendar
+                selected={book.pages[shownIndex]?.day ?? today}
+                today={today}
+                marked={writtenDays}
+                enabled={writtenDays}
+                years={book.years}
+                onPick={pickDay}
+              />
+            </div>
           )}
         </div>
         <div className="text-muted flex items-center gap-1">
@@ -429,6 +456,9 @@ export function BookPage({
 
       {covers && (
         <Sheet title="本子封面" onClose={() => setCovers(false)} wide>
+          <h3 className="text-muted mb-2 text-xs">封面颜色</h3>
+          <CaseColorPicker />
+          <h3 className="text-muted mt-5 mb-2 text-xs">封面图片</h3>
           <CoverPicker />
         </Sheet>
       )}

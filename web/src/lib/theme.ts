@@ -1,4 +1,4 @@
-// The theme colour she picks. Fills (buttons, the selected tab, the book's case) use it exactly; text in that
+// The theme colour she picks. Fills (buttons, the selected tab, the book's case unless she gave it its own colour) use it exactly; text in that
 // colour (tags, links) uses a version dark or light enough to read; in dark mode both are lifted as needed.
 
 import type { SettingsData } from "@shared/records";
@@ -102,6 +102,10 @@ export function applyTheme(settings: SettingsData, systemDark: boolean, doc: Doc
   style.setProperty("--moli-accent", colors.accent);
   style.setProperty("--moli-accent-fg", colors.accentFg);
   style.setProperty("--accent-ink", colors.ink);
+  // The book's case keeps its own colour when she chose one; otherwise styles.css falls back to the accent.
+  if (settings.caseColor)
+    style.setProperty("--case-color", themeColors(settings.caseColor, dark).accent);
+  else style.removeProperty("--case-color");
   doc
     .querySelector('meta[name="theme-color"]')
     ?.setAttribute("content", dark ? "#141414" : "#ffffff");

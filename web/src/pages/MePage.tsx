@@ -2,8 +2,16 @@ import { Check, Cloud, CloudOff, Monitor, Moon, RefreshCw, Sun } from "lucide-re
 import { useState, type ReactNode } from "react";
 import type { SettingsData } from "@shared/records";
 import { ColorPicker } from "../components/ColorPicker";
-import { CoverPicker } from "../components/CoverPicker";
+import { CaseColorPicker, CoverPicker } from "../components/CoverPicker";
 import { useApp } from "../context";
+import { readLocal, writeLocal } from "../hooks";
+import {
+  applyListSize,
+  LIST_SIZE_KEY,
+  LIST_SIZES,
+  listLeading,
+  parseListSize,
+} from "../lib/list-size";
 import { getSettings, saveSettings } from "../lib/model";
 import { DEFAULT_ACCENT } from "../lib/theme";
 import { formatClock, formatFullDay, dayKey } from "../lib/time";
@@ -54,6 +62,12 @@ export function MePage() {
   const status = engine.getStatus();
   const pending = Object.keys(state.pending).length;
   const [syncing, setSyncing] = useState(false);
+  const [listSize, setListSize] = useState(() => parseListSize(readLocal(LIST_SIZE_KEY)));
+  const chooseListSize = (px: number) => {
+    setListSize(px);
+    writeLocal(LIST_SIZE_KEY, String(px));
+    applyListSize(px);
+  };
 
   const syncText =
     status === "offline"
@@ -96,10 +110,7 @@ export function MePage() {
         </div>
       </header>
 
-      <Section
-        title="主题色"
-        hint="标签、按钮、导航和本子的书壳都用这个颜色。可以点选，也可以输入色号。"
-      >
+      <Section title="主题色" hint="标签、按钮和导航都用这个颜色。可以点选，也可以输入色号。">
         <ColorPicker
           value={settings.accent ?? DEFAULT_ACCENT}
           onChange={(color) =>
@@ -136,6 +147,39 @@ export function MePage() {
             </button>
           ))}
         </div>
+      </Section>
+
+      <Section title="清单字号" hint="只影响这台设备。">
+        <div
+          className="bg-surface-2 grid grid-cols-4 rounded-xl p-1"
+          role="radiogroup"
+          aria-label="清单字号"
+        >
+          {LIST_SIZES.map(({ px, label }) => (
+            <button
+              key={px}
+              type="button"
+              role="radio"
+              aria-checked={listSize === px}
+              onClick={() => chooseListSize(px)}
+              className={`rounded-lg py-2 text-sm ${
+                listSize === px ? "bg-surface shadow-sm" : "text-muted"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <p
+          className="border-border mt-3 rounded-xl border px-4 py-2.5"
+          style={{ fontSize: listSize, lineHeight: `${listLeading(listSize)}px` }}
+        >
+          R 21-1-3 复盘 <span className="text-accent-ink">#阅读</span>
+        </p>
+      </Section>
+
+      <Section title="封面颜色" hint="本子书壳和书脊的颜色。">
+        <CaseColorPicker />
       </Section>
 
       <Section title="本子封面">

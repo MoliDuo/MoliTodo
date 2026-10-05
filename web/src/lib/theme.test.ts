@@ -65,4 +65,11 @@ describe("theme colours", () => {
     expect(document.body.style.getPropertyValue("--moli-accent")).toBe(DEFAULT_ACCENT);
     meta.remove();
   });
+
+  it("gives the book's case its own colour only when one is chosen", () => {
+    applyTheme({ accent: null, theme: "light", cover: "monet", caseColor: "#2f7f8f" }, false);
+    expect(document.body.style.getPropertyValue("--case-color")).toBe("#2f7f8f");
+    applyTheme({ accent: null, theme: "light", cover: "monet", caseColor: null }, false);
+    expect(document.body.style.getPropertyValue("--case-color")).toBe("");
+  });
 });

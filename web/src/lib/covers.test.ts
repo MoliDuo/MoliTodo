@@ -1,6 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MAX_COVER_LENGTH } from "@shared/records";
-import { compressCover, COVER_HEIGHT, COVER_WIDTH, coverCrop, coverSrc, UPLOAD } from "./covers";
+import {
+  compressCover,
+  COVER_HEIGHT,
+  COVER_WIDTH,
+  coverCrop,
+  COVERS,
+  coverSrc,
+  fallbackChoice,
+  UPLOAD,
+  visibleCovers,
+} from "./covers";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -8,17 +18,56 @@ afterEach(() => {
 });
 
 describe("coverSrc", () => {
+  const mine = [
+    { choice: UPLOAD, image: "data:image/jpeg;base64,AAAA" },
+    { choice: "u:2", image: "data:image/jpeg;base64,BBBB" },
+  ];
+
   it("uses her picture when she chose it and it is there", () => {
-    expect(coverSrc(UPLOAD, "data:image/jpeg;base64,AAAA")).toBe("data:image/jpeg;base64,AAAA");
+    expect(coverSrc(UPLOAD, mine)).toBe("data:image/jpeg;base64,AAAA");
+    expect(coverSrc("u:2", mine)).toBe("data:image/jpeg;base64,BBBB");
   });
 
   it("falls back to the first painting for a missing upload or an unknown choice", () => {
-    expect(coverSrc(UPLOAD, null)).toBe("/covers/monet.webp");
-    expect(coverSrc("gone", null)).toBe("/covers/monet.webp");
+    expect(coverSrc(UPLOAD, [])).toBe("/covers/monet.webp");
+    expect(coverSrc("u:9", mine)).toBe("/covers/monet.webp");
+    expect(coverSrc("gone", [])).toBe("/covers/monet.webp");
   });
 
   it("finds a painting by id", () => {
-    expect(coverSrc("kiss", "data:image/jpeg;base64,AAAA")).toBe("/covers/kiss.webp");
+    expect(coverSrc("kiss", mine)).toBe("/covers/kiss.webp");
+  });
+
+  it("skips removed paintings, then falls back to her uploads", () => {
+    expect(coverSrc("monet", [], ["monet"])).toBe("/covers/almond.webp");
+    const all = COVERS.map((c) => c.id);
+    expect(coverSrc("monet", mine, all)).toBe("data:image/jpeg;base64,AAAA");
+    expect(coverSrc("monet", [], all)).toBe("/covers/monet.webp");
+  });
+});
+
+describe("visibleCovers and fallbackChoice", () => {
+  it("leaves out removed paintings", () => {
+    expect(visibleCovers(["wave", "kiss"]).map((c) => c.id)).toEqual([
+      "monet",
+      "almond",
+      "starry",
+      "lilies",
+      "parasol",
+    ]);
+    expect(visibleCovers()).toHaveLength(COVERS.length);
+  });
+
+  it("picks the first painting left, else an upload, else the first painting", () => {
+    expect(fallbackChoice("monet", [], [])).toBe("almond");
+    expect(fallbackChoice("u:1", [], ["monet"])).toBe("almond");
+    const all = COVERS.map((c) => c.id);
+    const mine = [
+      { choice: "u:1", image: "a" },
+      { choice: "u:2", image: "b" },
+    ];
+    expect(fallbackChoice("u:1", mine, all)).toBe("u:2");
+    expect(fallbackChoice("u:1", [mine[0] as (typeof mine)[0]], all)).toBe("monet");
   });
 });
 

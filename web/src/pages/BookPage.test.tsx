@@ -140,20 +140,60 @@ describe("BookPage closed", () => {
     expect(screen.getAllByRole("button", { name: "打开今天" })).toHaveLength(2);
     expect(screen.queryByRole("button", { name: /合上/ })).toBeNull();
 
-    const yearButton = screen.getByRole("button", { name: "2026 年，换一年" });
-    fireEvent.click(yearButton);
-    expect(yearButton.getAttribute("aria-expanded")).toBe("true");
-    fireEvent.click(screen.getByRole("button", { name: "2025" }));
-    expect(hash()).toBe("#/book/2025");
+    go("#/book/2025");
     expect(screen.getAllByRole("button", { name: "打开本子" })).toHaveLength(2);
     expect(stat("已写")).toBe("1");
+  });
 
-    fireEvent.click(screen.getByRole("button", { name: "2025 年，换一年" }));
-    fireEvent.click(screen.getByRole("button", { name: "2026" }));
-    expect(hash()).toBe("#/book");
-    fireEvent.click(screen.getByRole("button", { name: "2026 年，换一年" }));
-    fireEvent.click(screen.getByRole("button", { name: "2026 年，换一年" }));
-    expect(screen.queryByRole("button", { name: "2025" })).toBeNull();
+  it("picks a written day from the calendar and opens the book there", async () => {
+    await book("#/book");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const yearButton = screen.getByRole("button", { name: "2026 年，选一天" });
+    fireEvent.click(yearButton);
+    expect(yearButton.getAttribute("aria-expanded")).toBe("true");
+    // Only days with something written can be picked.
+    expect((screen.getByRole("button", { name: "2026-10-01" }) as HTMLButtonElement).disabled).toBe(
+      true
+    );
+    expect((screen.getByRole("button", { name: "2026-10-05" }) as HTMLButtonElement).disabled).toBe(
+      true
+    );
+    fireEvent.click(screen.getByRole("button", { name: "2026-10-03" }));
+    expect(screen.queryByRole("dialog", { name: "选一天" })).toBeNull();
+    expect(hash()).toBe("#/book?day=2026-10-03");
+    expect(world().className).toContain("phase-opening");
+    act(() => vi.advanceTimersByTime(1100));
+    expect(world().className).toContain("phase-open");
+    expect(face("right")?.textContent).toContain("十月三日");
+
+    // Open, another day turns to it straight away.
+    fireEvent.click(yearButton);
+    fireEvent.click(screen.getByRole("button", { name: "2026-10-02" }));
+    expect(hash()).toBe("#/book?day=2026-10-02");
+    expect(world().className).toContain("phase-open");
+  });
+
+  it("jumps to another year in the calendar, and closes on Esc or a tap outside", async () => {
+    await book("#/book");
+    const yearButton = screen.getByRole("button", { name: "2026 年，选一天" });
+    fireEvent.click(yearButton);
+    fireEvent.keyDown(yearButton, { key: "Escape" });
+    expect(yearButton.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(yearButton);
+    fireEvent.pointerDown(document.body);
+    expect(yearButton.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(yearButton);
+    // A tap inside the calendar keeps it open.
+    fireEvent.pointerDown(screen.getByRole("dialog", { name: "选一天" }));
+    expect(yearButton.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "2026年10月，换一年" }));
+    fireEvent.click(screen.getByRole("button", { name: "2025" }));
+    expect(screen.getByText("2025年5月")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "2025-05-01" }));
+    expect(hash()).toBe("#/book/2025?day=2025-05-01");
+    expect(world().className).toContain("phase-open");
+    expect(face("right")?.textContent).toContain("去年的一行");
   });
 
   it("asks for the first day when nothing is written", async () => {
@@ -657,7 +697,8 @@ describe("BookPage covers", () => {
       "data:image/jpeg;base64,AAAA"
     );
     await synced(store);
-    expect(api.data("cover", "cover")).toEqual({ image: "data:image/jpeg;base64,AAAA" });
-    expect(api.data("settings", "settings")).toMatchObject({ cover: "upload" });
+    const choice = (api.data("settings", "settings") as { cover: string }).cover;
+    expect(choice).toMatch(/^u:/);
+    expect(api.data("cover", choice.slice(2))).toEqual({ image: "data:image/jpeg;base64,AAAA" });
   });
 });

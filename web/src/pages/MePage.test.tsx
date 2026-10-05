@@ -77,11 +77,15 @@ describe("MePage appearance", () => {
   it("saves the theme colour: a preset, the default (as none) and a typed code", async () => {
     const api = createFakeApi();
     const { store } = await renderApp({ api, hash: "#/me" });
-    const amber = screen.getByRole("button", { name: "琥珀" });
+    // The case colour has the same swatches; these are the theme colour's.
+    const theme = within(
+      screen.getByRole("heading", { name: "主题色" }).closest("section") as HTMLElement
+    );
+    const amber = theme.getByRole("button", { name: "琥珀" });
     expect(amber.getAttribute("aria-pressed")).toBe("true");
 
-    fireEvent.click(screen.getByRole("button", { name: "湖水" }));
-    expect(screen.getByRole("button", { name: "湖水" }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(theme.getByRole("button", { name: "湖水" }));
+    expect(theme.getByRole("button", { name: "湖水" }).getAttribute("aria-pressed")).toBe("true");
     expect(accentVar()).toBe("#2f7f8f");
     await synced(store);
     expect(savedSettings(api)).toEqual({ accent: "#2f7f8f", theme: "system", cover: "monet" });
@@ -91,10 +95,10 @@ describe("MePage appearance", () => {
     await synced(store);
     expect(savedSettings(api)?.accent).toBeNull();
 
-    fireEvent.change(screen.getByRole("textbox", { name: "色号" }), {
+    fireEvent.change(theme.getByRole("textbox", { name: "色号" }), {
       target: { value: "#123456" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "用这个" }));
+    fireEvent.click(theme.getByRole("button", { name: "用这个" }));
     expect(accentVar()).toBe("#123456");
     expect(document.body.style.getPropertyValue("--moli-accent-fg")).toBe("#ffffff");
     await synced(store);
@@ -134,6 +138,38 @@ describe("MePage appearance", () => {
       screen.getByRole("button", { name: "莫奈《鲁昂大教堂》" }).getAttribute("aria-pressed")
     ).toBe("true");
     expect(screen.getByRole("button", { name: "上传图片" })).toBeTruthy();
+  });
+
+  it("sets the case colour, and no longer says the theme colour paints the case", async () => {
+    const api = createFakeApi();
+    const { store } = await renderApp({ api, hash: "#/me" });
+    expect(screen.queryByText(/书壳都用/)).toBeNull();
+    const section = screen
+      .getByRole("heading", { name: "封面颜色" })
+      .closest("section") as HTMLElement;
+    fireEvent.click(within(section).getByRole("button", { name: "群青" }));
+    expect(document.body.style.getPropertyValue("--case-color")).toBe("#4466bb");
+    await synced(store);
+    expect(savedSettings(api)?.caseColor).toBe("#4466bb");
+    expect(savedSettings(api)?.accent).toBeNull();
+  });
+
+  it("sets the list text size for this device only", async () => {
+    const api = createFakeApi();
+    const { store } = await renderApp({ api, hash: "#/me" });
+    const sizes = within(screen.getByRole("radiogroup", { name: "清单字号" }));
+    expect(sizes.getByRole("radio", { name: "标准" }).getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(sizes.getByRole("radio", { name: "特大" }));
+    expect(sizes.getByRole("radio", { name: "特大" }).getAttribute("aria-checked")).toBe("true");
+    const root = document.documentElement.style;
+    expect(root.getPropertyValue("--list-size")).toBe("18px");
+    expect(root.getPropertyValue("--list-leading")).toBe("29px");
+    expect(window.localStorage.getItem("moli-todo:list-size")).toBe("18");
+    await synced(store);
+    expect(savedSettings(api)).toBeNull();
+    window.localStorage.removeItem("moli-todo:list-size");
+    root.removeProperty("--list-size");
+    root.removeProperty("--list-leading");
   });
 });
 
