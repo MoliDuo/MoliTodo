@@ -739,6 +739,36 @@ describe("TodayPage task menu", () => {
     expect(texts(engine)).toEqual(["一", "二"]);
   });
 
+  it("drags with a mouse as soon as it moves, without the long press", async () => {
+    const api = createFakeApi();
+    seedTask(api, TODAY, "一");
+    seedTask(api, TODAY, "二");
+    seedTask(api, TODAY, "三");
+    const { engine } = await renderApp({ api });
+    const rows = [...list().querySelectorAll<HTMLElement>("li[data-task-id]")];
+    rows.forEach((row, i) => {
+      row.getBoundingClientRect = () =>
+        ({
+          top: i * 30,
+          height: 30,
+          bottom: i * 30 + 30,
+          left: 0,
+          right: 300,
+          width: 300,
+        }) as DOMRect;
+    });
+    const row = rowOf(line(2));
+    const mouse = { button: 0, pointerType: "mouse" };
+    fireEvent.pointerDown(row, { ...mouse, clientX: 50, clientY: 75 });
+    fireEvent.pointerMove(row, { ...mouse, clientX: 50, clientY: 60 });
+    expect(row.className).toContain("shadow-lg");
+    fireEvent.pointerMove(row, { ...mouse, clientX: 50, clientY: 10 });
+    fireEvent.pointerUp(row, mouse);
+    fireEvent.click(row);
+    expect(texts(engine)).toEqual(["三", "一", "二"]);
+    expect(document.activeElement?.tagName).not.toBe("TEXTAREA");
+  });
+
   it("deletes a line", async () => {
     const api = createFakeApi();
     const id = seedTask(api, TODAY, "不要了");

@@ -1,5 +1,6 @@
-// Long press a line, then drag it to another place in the day's list. Rows are measured once when the drag starts;
-// while it goes on, the other rows slide aside to show the gap, and on release the line moves for real.
+// Long press a line, then drag it to another place in the day's list. A mouse need not wait: pressing and moving
+// picks the line up at once (only a finger has to tell a drag from a scroll). Rows are measured once when the drag
+// starts; while it goes on, the other rows slide aside to show the gap, and on release the line moves for real.
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
@@ -28,6 +29,8 @@ interface Press {
   pointer: number;
   x: number;
   y: number;
+  /** A mouse drags as soon as it moves; a finger that moves first is scrolling. */
+  mouse: boolean;
   timer?: ReturnType<typeof setTimeout>;
   element: HTMLElement;
 }
@@ -180,6 +183,7 @@ export function useReorder({ ids, rows, onMove }: ReorderOptions) {
         pointer: event.pointerId,
         x: event.clientX,
         y: event.clientY,
+        mouse: event.pointerType === "mouse",
         element: event.currentTarget,
       };
       start.timer = setTimeout(() => begin(start), LONG_PRESS_MS);
@@ -188,8 +192,11 @@ export function useReorder({ ids, rows, onMove }: ReorderOptions) {
     onPointerMove: (event: ReactPointerEvent<HTMLElement>) => {
       if (live.current) return follow(event.clientY);
       const start = press.current;
-      if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > SLOP_PX)
-        cancelPress();
+      if (!start || Math.hypot(event.clientX - start.x, event.clientY - start.y) <= SLOP_PX) return;
+      if (!start.mouse) return cancelPress();
+      clearTimeout(start.timer);
+      begin(start);
+      follow(event.clientY);
     },
     onPointerUp: () => finish(true),
     onPointerCancel: () => finish(false),
