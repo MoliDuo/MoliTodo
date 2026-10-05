@@ -192,6 +192,61 @@ describe("StatsPage records", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("writes in a session by hand and changes one", async () => {
+    const { api } = seedWeek();
+    const { store } = await renderApp({ api, hash: "#/timer/stats" });
+    fireEvent.click(screen.getByRole("tab", { name: "周" }));
+    fireEvent.click(screen.getByRole("button", { name: "查看专注记录" }));
+    fireEvent.click(screen.getByRole("button", { name: "添加记录" }));
+    const form = screen.getByRole("dialog", { name: "添加记录" });
+    expect(screen.queryByRole("dialog", { name: "专注记录" })).toBeNull();
+    fireEvent.change(within(form).getByLabelText("名称"), { target: { value: "听力" } });
+    expect((within(form).getByLabelText("日期") as HTMLInputElement).value).toBe(TODAY);
+    fireEvent.change(within(form).getByLabelText("开始时间"), { target: { value: "08:00" } });
+    fireEvent.change(within(form).getByLabelText("用时"), { target: { value: "两小时" } });
+    fireEvent.click(within(form).getByRole("button", { name: "保存" }));
+    expect(within(form).getByText(/用时写成/)).toBeTruthy();
+    fireEvent.change(within(form).getByLabelText("用时"), { target: { value: "0" } });
+    fireEvent.click(within(form).getByRole("button", { name: "保存" }));
+    expect(within(form).getByText(/用时写成/)).toBeTruthy();
+    fireEvent.change(within(form).getByLabelText("用时"), { target: { value: "1h20min" } });
+    fireEvent.change(within(form).getByLabelText("日期"), { target: { value: "" } });
+    fireEvent.click(within(form).getByRole("button", { name: "保存" }));
+    expect(within(form).getByText("日期或开始时间不对")).toBeTruthy();
+    fireEvent.change(within(form).getByLabelText("日期"), { target: { value: TODAY } });
+    fireEvent.click(within(form).getByRole("button", { name: "保存" }));
+
+    const dialog = screen.getByRole("dialog", { name: "专注记录" });
+    // Newest first: after 阅读 at 10:00.
+    expect(within(dialog).getAllByRole("listitem")[1]?.textContent).toBe(
+      "听力10月4日 周日 08:00–09:201小时20分"
+    );
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "修改 单词" }));
+    const edit = screen.getByRole("dialog", { name: "修改记录" });
+    expect((within(edit).getByLabelText("名称") as HTMLInputElement).value).toBe("单词");
+    expect((within(edit).getByLabelText("用时") as HTMLInputElement).value).toBe("30min");
+    fireEvent.change(within(edit).getByLabelText("名称"), { target: { value: "背单词" } });
+    fireEvent.change(within(edit).getByLabelText("用时"), { target: { value: "45" } });
+    fireEvent.click(within(edit).getByRole("button", { name: "保存" }));
+    expect(
+      within(screen.getByRole("dialog", { name: "专注记录" })).getByText("背单词")
+    ).toBeTruthy();
+    expect(legend().some((item) => item?.startsWith("背单词"))).toBe(true);
+
+    // Cancel leaves it as it was.
+    fireEvent.click(screen.getByRole("button", { name: "修改 背单词" }));
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(screen.getByRole("dialog", { name: "专注记录" })).toBeTruthy();
+
+    await synced(store);
+    const sessions = [...api.rows.values()]
+      .filter((r) => r.kind === "session" && !r.deleted)
+      .map((r) => r.data as { name: string; seconds: number });
+    expect(sessions).toContainEqual(expect.objectContaining({ name: "听力", seconds: 4800 }));
+    expect(sessions).toContainEqual(expect.objectContaining({ name: "背单词", seconds: 2700 }));
+  });
+
   it("says when the range has no records, with the year for another year", async () => {
     const api = createFakeApi();
     seedSession(api, "旧事", "2025-12-31", 900);

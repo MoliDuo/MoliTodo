@@ -61,14 +61,23 @@ export function Shell({
   const systemDark = useMediaQuery("(prefers-color-scheme: dark)");
   const settings = getSettings(engine);
   useEffect(
-    () => applyTheme({ accent: settings.accent, theme: settings.theme, cover: "" }, systemDark),
-    [settings.accent, settings.theme, systemDark]
+    () =>
+      applyTheme(
+        {
+          accent: settings.accent,
+          theme: settings.theme,
+          cover: "",
+          caseColor: settings.caseColor ?? null,
+        },
+        systemDark
+      ),
+    [settings.accent, settings.theme, settings.caseColor, systemDark]
   );
   const route = parseRoute(useHash());
   const today = dayKey(now);
   const context = useMemo<AppContextValue>(
-    () => ({ engine, me, now, today, tick }),
-    [engine, me, now, today, tick]
+    () => ({ engine, files: store.files, me, now, today, tick }),
+    [engine, store.files, me, now, today, tick]
   );
   const status = engine.getStatus();
 

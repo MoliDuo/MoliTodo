@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
+import { MAX_UPLOADED_COVERS } from "@shared/records";
 import {
+  addImages,
   addTask,
+  imagesOf,
+  isTodo,
+  markOf,
+  removeCover,
+  removeImage,
+  restoreCovers,
+  setMark,
   deleteTask,
   getSettings,
   groupByDay,
@@ -10,6 +19,9 @@ import {
   renameTagEverywhere,
   saveSettings,
   saveUploadedCover,
+  uploadChoice,
+  canUploadCover,
+  COVER_ID,
   searchTasks,
   setHighlight,
   setTagColor,
@@ -20,7 +32,7 @@ import {
   toggleTask,
   totalMinutes,
   updateTask,
-  uploadedCover,
+  uploadedCovers,
   writtenTasks,
 } from "./model";
 import { SyncEngine } from "./sync";
@@ -96,6 +108,64 @@ describe("day lists", () => {
     moveTask(e, a, "missing");
     moveTask(e, "missing", b);
     expect(texts(e)).toEqual(["a", "b", "c"]);
+  });
+
+  it("keeps notes (dots and dashes) apart from to-dos", () => {
+    const e = engine();
+    const box = addTask(e, DAY, { text: "todo" });
+    const dot = addTask(e, DAY, { text: "note", mark: "dot" });
+    expect(e.get("task", box)?.data.mark).toBeUndefined();
+    expect(markOf(e.get("task", box) as never)).toBe("box");
+    expect(markOf(e.get("task", dot) as never)).toBe("dot");
+    expect(isTodo(e.get("task", dot) as never)).toBe(false);
+    // A note is never ticked.
+    expect(toggleTask(e, dot, 5)).toBe(false);
+    expect(e.get("task", dot)?.data.done).toBe(false);
+
+    // Turning a finished to-do into a note clears what only to-dos have.
+    toggleTask(e, box, 5);
+    updateTask(e, box, { duration: 30 });
+    setMark(e, box, "dash");
+    expect(e.get("task", box)?.data).toMatchObject({
+      mark: "dash",
+      done: false,
+      doneAt: null,
+      duration: null,
+    });
+    setMark(e, box, "box");
+    expect(isTodo(e.get("task", box) as never)).toBe(true);
+  });
+
+  it("does not offer yesterday's notes", () => {
+    const e = engine();
+    addTask(e, "2026-10-03", { text: "note", mark: "dash" });
+    addTask(e, "2026-10-03", { text: "todo" });
+    expect(leftFromYesterday(e, DAY).map((t) => t.data.text)).toEqual(["todo"]);
+  });
+
+  it("sets the highlight style with the colour", () => {
+    const e = engine();
+    const a = addTask(e, DAY, { text: "a" });
+    setHighlight(e, a, "blue", "underline");
+    expect(e.get("task", a)?.data).toMatchObject({
+      highlight: "blue",
+      highlightStyle: "underline",
+    });
+    setHighlight(e, a, "red");
+    expect(e.get("task", a)?.data).toMatchObject({ highlight: "red", highlightStyle: "underline" });
+  });
+
+  it("adds and removes pictures", () => {
+    const e = engine();
+    const a = addTask(e, DAY, { text: "a" });
+    expect(imagesOf(e.get("task", a) as never)).toEqual([]);
+    addImages(e, a, ["f1", "f2"]);
+    addImages(e, a, ["f3"]);
+    removeImage(e, a, "f2");
+    expect(e.get("task", a)?.data.images).toEqual(["f1", "f3"]);
+    addImages(e, "missing", ["x"]);
+    removeImage(e, "missing", "x");
+    expect(e.get("task", "missing")).toBeNull();
   });
 
   it("offers yesterday's open written tasks and moves them to the end of today", () => {
@@ -193,9 +263,37 @@ describe("appearance", () => {
     expect(getSettings(e)).toEqual({ accent: null, theme: "system", cover: "monet" });
     saveSettings(e, { accent: "#123456" });
     expect(getSettings(e).accent).toBe("#123456");
-    expect(uploadedCover(e)).toBeNull();
-    saveUploadedCover(e, "data:image/jpeg;base64,AA==");
-    expect(uploadedCover(e)).toBe("data:image/jpeg;base64,AA==");
-    expect(getSettings(e)).toMatchObject({ accent: "#123456", cover: "upload" });
+    expect(uploadedCovers(e)).toEqual([]);
+    const id = saveUploadedCover(e, "data:image/jpeg;base64,AA==", 1000);
+    expect(uploadedCovers(e)).toEqual([
+      { id, choice: `u:${id}`, image: "data:image/jpeg;base64,AA==" },
+    ]);
+    expect(getSettings(e)).toMatchObject({ accent: "#123456", cover: `u:${id}` });
+  });
+
+  it("keeps several uploads in upload order, the first one of old first", () => {
+    const e = engine();
+    e.put("cover", COVER_ID, { image: "data:image/jpeg;base64,AA==" });
+    const later = saveUploadedCover(e, "data:image/jpeg;base64,CC==", 2000);
+    const sooner = saveUploadedCover(e, "data:image/jpeg;base64,BB==", 1000);
+    expect(uploadedCovers(e).map((c) => c.choice)).toEqual(["upload", `u:${sooner}`, `u:${later}`]);
+    expect(uploadChoice(COVER_ID)).toBe("upload");
+    for (let i = 3; i < MAX_UPLOADED_COVERS; i += 1)
+      saveUploadedCover(e, "data:image/png;base64,A");
+    expect(canUploadCover(e)).toBe(false);
+  });
+
+  it("removes paintings and uploads, choosing another when the chosen one goes", () => {
+    const e = engine();
+    removeCover(e, "kiss");
+    expect(getSettings(e)).toMatchObject({ cover: "monet", hiddenCovers: ["kiss"] });
+    removeCover(e, "monet");
+    expect(getSettings(e)).toMatchObject({ cover: "almond", hiddenCovers: ["kiss", "monet"] });
+    const id = saveUploadedCover(e, "data:image/jpeg;base64,AA==", 1000);
+    removeCover(e, `u:${id}`);
+    expect(uploadedCovers(e)).toEqual([]);
+    expect(getSettings(e).cover).toBe("almond");
+    restoreCovers(e);
+    expect(getSettings(e).hiddenCovers).toEqual([]);
   });
 });

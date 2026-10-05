@@ -17,7 +17,10 @@ const plain = ({ kind, id, data, deleted, version }: SyncRecord): SyncRecord => 
 export function createFakeApi() {
   const rows = new Map<string, SyncRecord & { seq: number }>();
   let seq = 0;
+  let files = 0;
   const api = {
+    /** Uploaded pictures by id. */
+    files: new Map<string, Blob>(),
     /** Set to a status to make every request answer it, e.g. 401 or 500; "network" throws. */
     fail: null as number | "network" | null,
     requests: [] as {
@@ -48,7 +51,8 @@ export function createFakeApi() {
     fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input), "https://todo.test");
       const method = init?.method ?? "GET";
-      const body = init?.body ? (JSON.parse(String(init.body)) as PutRecordBody) : undefined;
+      const body =
+        typeof init?.body === "string" ? (JSON.parse(init.body) as PutRecordBody) : undefined;
       api.requests.push({
         method,
         url: url.pathname + url.search,
@@ -58,6 +62,16 @@ export function createFakeApi() {
       if (api.fail === "network") throw new TypeError("failed to fetch");
       if (api.fail) return json(api.fail, { error: { code: "x", message: "x" } });
       if (url.pathname === "/api/v1/me") return json(200, ME);
+      if (url.pathname === "/api/v2/files" && method === "POST") {
+        const id = `00000000-0000-4000-8000-${String((files += 1)).padStart(12, "0")}`;
+        api.files.set(id, init?.body as Blob);
+        return json(200, { id });
+      }
+      const file = /^\/api\/v2\/files\/(.+)$/.exec(url.pathname);
+      if (file && method === "DELETE") {
+        api.files.delete(file[1] as string);
+        return json(200, { ok: true });
+      }
       if (url.pathname === "/api/v2/changes") {
         const cursor = Number(url.searchParams.get("cursor") ?? 0);
         const page = [...rows.values()]

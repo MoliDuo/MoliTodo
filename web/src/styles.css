@@ -18,6 +18,14 @@
   --hl-blue: #bfdbfe;
   --hl-green: #bbf7d0;
   --hl-purple: #ddd6fe;
+  --ul-yellow: #eab308;
+  --ul-red: #ef4444;
+  --ul-blue: #3b82f6;
+  --ul-green: #22c55e;
+  --ul-purple: #8b5cf6;
+  /* The size of list text; set per device on "我的" (see web/src/lib/list-size.ts). */
+  --list-size: 16px;
+  --list-leading: 26px;
 }
 
 :root[data-theme="dark"] {
@@ -28,6 +36,11 @@
   --hl-blue: rgba(96, 165, 250, 0.32);
   --hl-green: rgba(74, 222, 128, 0.28);
   --hl-purple: rgba(167, 139, 250, 0.34);
+  --ul-yellow: #facc15;
+  --ul-red: #f87171;
+  --ul-blue: #60a5fa;
+  --ul-green: #4ade80;
+  --ul-purple: #a78bfa;
 }
 
 html,
@@ -65,6 +78,31 @@ body {
 }
 .hl-purple {
   background: var(--hl-purple);
+}
+/* The underline kind: a coloured line under the words instead of colour behind them. */
+.hl.hl-u {
+  background: none;
+  padding: 0;
+  margin: 0;
+  text-decoration-line: underline;
+  text-decoration-thickness: 2.5px;
+  text-underline-offset: 4px;
+  text-decoration-skip-ink: none;
+}
+.hl-u.hl-yellow {
+  text-decoration-color: var(--ul-yellow);
+}
+.hl-u.hl-red {
+  text-decoration-color: var(--ul-red);
+}
+.hl-u.hl-blue {
+  text-decoration-color: var(--ul-blue);
+}
+.hl-u.hl-green {
+  text-decoration-color: var(--ul-green);
+}
+.hl-u.hl-purple {
+  text-decoration-color: var(--ul-purple);
 }
 
 /* The editable line: a transparent textarea over a copy of the text that shows tags and highlights. The copy
@@ -122,6 +160,11 @@ body {
   }
 }
 
+/* No "copy / look up" bubble on a long press: there it picks a line up. */
+.no-callout {
+  -webkit-touch-callout: none;
+}
+
 .safe-bottom {
   padding-bottom: env(safe-area-inset-bottom);
 }
@@ -162,7 +205,7 @@ body {
 }
 
 .book-case {
-  background-color: var(--moli-accent);
+  background-color: var(--case-color, var(--moli-accent));
   background-image:
     linear-gradient(160deg, rgba(255, 255, 255, 0.14), transparent 45%, rgba(0, 0, 0, 0.16)),
     radial-gradient(rgba(0, 0, 0, 0.07) 1px, transparent 1.2px);
@@ -199,7 +242,7 @@ body {
 }
 
 .endpaper {
-  background-color: color-mix(in srgb, var(--moli-accent) 78%, #000);
+  background-color: color-mix(in srgb, var(--case-color, var(--moli-accent)) 78%, #000);
   background-image: radial-gradient(rgba(255, 255, 255, 0.09) 1px, transparent 1.6px);
   background-size: 14px 14px;
 }
@@ -239,9 +282,9 @@ body {
   width: 9%;
   background: linear-gradient(
     to right,
-    color-mix(in srgb, var(--moli-accent) 70%, #000),
-    var(--moli-accent) 45%,
-    color-mix(in srgb, var(--moli-accent) 80%, #000)
+    color-mix(in srgb, var(--case-color, var(--moli-accent)) 70%, #000),
+    var(--case-color, var(--moli-accent)) 45%,
+    color-mix(in srgb, var(--case-color, var(--moli-accent)) 80%, #000)
   );
   box-shadow: 2px 0 4px rgba(0, 0, 0, 0.25);
 }

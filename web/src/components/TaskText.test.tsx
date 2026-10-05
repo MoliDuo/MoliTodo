@@ -28,6 +28,14 @@ describe("TaskWords", () => {
     expect(tag.style.color).toBe("rgb(17, 34, 51)");
     expect(tag.className).toBe("opacity-80");
     expect(container.querySelector(".hl-blue")?.textContent).toBe("读 #书");
+    expect(container.querySelector(".hl-u")).toBeNull();
+  });
+
+  it("draws the highlight as a line under the words when asked", () => {
+    const { container } = render(
+      <TaskWords text="读" highlight="red" highlightStyle="underline" tagColors={new Map()} />
+    );
+    expect(container.querySelector(".hl.hl-red.hl-u")?.textContent).toBe("读");
   });
 });
 
@@ -38,6 +46,19 @@ describe("TaskMark", () => {
     rerender(<TaskMark done />);
     expect(container.querySelector("svg")).not.toBeNull();
   });
+
+  it("draws a dot or a dash for a note, done or not", () => {
+    const { container, rerender } = render(<TaskMark done mark="dot" size={18} />);
+    const dot = container.firstElementChild as HTMLElement;
+    expect(dot.className).toContain("rounded-full");
+    expect(dot.style.width).toBe("6px");
+    expect(dot.style.height).toBe("6px");
+    rerender(<TaskMark done={false} mark="dash" size={18} />);
+    const dash = container.firstElementChild as HTMLElement;
+    expect(dash.style.width).toBe("11px");
+    expect(dash.style.height).toBe("1.5px");
+    expect(container.querySelector("svg")).toBeNull();
+  });
 });
 
 describe("TaskLine", () => {
@@ -46,7 +67,7 @@ describe("TaskLine", () => {
     const line = container.firstElementChild as HTMLElement;
     expect(line.tagName).toBe("DIV");
     expect(line.style.paddingLeft).toBe("24px");
-    expect(line.className).toContain("text-[15px]");
+    expect(line.className).toContain("text-[length:var(--list-size)]");
     expect(line.textContent).toBe("R 21-1-3#阅读 复盘");
   });
 
@@ -66,6 +87,16 @@ describe("TaskLine", () => {
     expect(button.textContent).toContain("1h13min");
     fireEvent.click(button);
     expect(onOpen).toHaveBeenCalledOnce();
+  });
+
+  it("marks a line that has pictures", () => {
+    render(
+      <TaskLine
+        task={task({ images: ["11111111-1111-4111-8111-111111111111"] })}
+        tagColors={new Map()}
+      />
+    );
+    expect(screen.getByLabelText("1 张图片")).toBeTruthy();
   });
 
   it("leaves the time out when none was given", () => {

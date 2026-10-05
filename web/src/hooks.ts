@@ -42,3 +42,25 @@ export function writeLocal(key: string, value: string): void {
     // Private mode or storage off: the choice is just not remembered.
   }
 }
+
+/**
+ * How much of the bottom of the window the on-screen keyboard covers (0 when there is none), so something fixed
+ * to the bottom can sit just above it. Phones shrink the visual viewport, not the window, when the keyboard opens.
+ */
+export function useKeyboardInset(): number {
+  const [inset, setInset] = useState(0);
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+    const update = () =>
+      setInset(Math.max(0, Math.round(window.innerHeight - viewport.height - viewport.offsetTop)));
+    update();
+    viewport.addEventListener("resize", update);
+    viewport.addEventListener("scroll", update);
+    return () => {
+      viewport.removeEventListener("resize", update);
+      viewport.removeEventListener("scroll", update);
+    };
+  }, []);
+  return inset;
+}

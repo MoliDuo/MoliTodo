@@ -9,7 +9,7 @@ import {
   monthSeries,
   pauseTimer,
   rangeOf,
-  recentNames,
+  saveSession,
   sessions,
   setTimerName,
   shiftAnchor,
@@ -76,7 +76,7 @@ describe("stopwatch", () => {
     expect(sessions(e)[0]?.data.name).toBe(UNNAMED);
   });
 
-  it("lists recent names once each and deletes sessions", () => {
+  it("lists sessions newest first and deletes them", () => {
     const e = engine();
     for (const [name, at] of [
       ["a", 0],
@@ -87,10 +87,48 @@ describe("stopwatch", () => {
       startTimer(e, T + at * MIN);
       finishTimer(e, T + (at + 5) * MIN);
     }
-    expect(recentNames(e)).toEqual(["a", "b"]);
-    expect(recentNames(e, 1)).toEqual(["a"]);
+    expect(sessions(e).map((s) => s.data.name)).toEqual(["a", "b", "a"]);
     deleteSession(e, sessions(e)[0]!.id);
     expect(sessions(e)).toHaveLength(2);
+  });
+});
+
+describe("sessions written in by hand", () => {
+  it("adds one at a day and time, and changes it", () => {
+    const e = engine();
+    const id = saveSession(e, null, {
+      name: " 阅读 ",
+      day: "2026-10-04",
+      start: "9:05",
+      minutes: 50,
+    });
+    expect(id).not.toBeNull();
+    // 09:05 in Singapore is 01:05 UTC.
+    const startedAt = Date.UTC(2026, 9, 4, 1, 5);
+    expect(e.get("session", id as string)?.data).toEqual({
+      name: "阅读",
+      day: "2026-10-04",
+      startedAt,
+      endedAt: startedAt + 50 * 60_000,
+      seconds: 3000,
+    });
+    saveSession(e, id, { name: "", day: "2026-10-03", start: "23:30", minutes: 90 });
+    expect(sessions(e)).toHaveLength(1);
+    expect(e.get("session", id as string)?.data).toMatchObject({
+      name: UNNAMED,
+      day: "2026-10-03",
+      seconds: 5400,
+    });
+  });
+
+  it("refuses a day, time or length that does not make sense", () => {
+    const e = engine();
+    const ok = { name: "a", day: "2026-10-04", start: "10:00", minutes: 30 };
+    expect(saveSession(e, null, { ...ok, day: "2026-02-30" })).toBeNull();
+    expect(saveSession(e, null, { ...ok, start: "24:00" })).toBeNull();
+    expect(saveSession(e, null, { ...ok, minutes: 0 })).toBeNull();
+    expect(saveSession(e, null, { ...ok, minutes: 24 * 60 + 1 })).toBeNull();
+    expect(saveSession(e, null, { ...ok, minutes: 24 * 60 })).not.toBeNull();
   });
 });
 

@@ -1,4 +1,4 @@
-import { index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { blob, index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 /** One row per person who has signed in (standard 008, 8.5.5). The key is `preferred_username`, lower-cased. */
 export const users = sqliteTable("users", {
@@ -51,4 +51,21 @@ export const records = sqliteTable(
     primaryKey({ columns: [table.owner, table.kind, table.id] }),
     index("records_owner_seq").on(table.owner, table.seq),
   ]
+);
+
+/**
+ * Pictures attached to tasks. They are kept apart from `records` so a sync does not carry them: a task holds only
+ * the file's id, and the page loads the picture by URL when it shows it. Rows are only added or removed.
+ */
+export const files = sqliteTable(
+  "files",
+  {
+    owner: text("owner").notNull(),
+    id: text("id").notNull(),
+    mime: text("mime").notNull(),
+    bytes: blob("bytes", { mode: "buffer" }).notNull(),
+    size: integer("size").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.owner, table.id] })]
 );

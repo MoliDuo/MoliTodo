@@ -29,6 +29,8 @@ export interface Book {
   lines: number;
   /** Every year with something written, plus this one, newest first. */
   years: number[];
+  /** Every day with something written, in any year, oldest first. */
+  days: string[];
 }
 
 export function makeBook(engine: SyncEngine, year: number, thisYear: number): Book {
@@ -56,6 +58,7 @@ export function makeBook(engine: SyncEngine, year: number, thisYear: number): Bo
     pages,
     lines: pages.reduce((sum, page) => sum + page.tasks.length, 0),
     years: [...years].sort((a, b) => b - a),
+    days,
   };
 }
 

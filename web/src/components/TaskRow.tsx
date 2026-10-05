@@ -1,13 +1,22 @@
-import { MoreHorizontal } from "lucide-react";
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import type { Mark } from "@shared/records";
 import { useApp } from "../context";
-import { clampIndent, deleteTask, toggleTask, updateTask, type Task } from "../lib/model";
+import { fileUrl } from "../lib/images";
+import {
+  clampIndent,
+  deleteTask,
+  imagesOf,
+  isTodo,
+  markOf,
+  toggleTask,
+  updateTask,
+  type Task,
+} from "../lib/model";
 import { formatDuration, parseDuration } from "../lib/time";
 import { TaskMark, TaskWords, type TagColors } from "./TaskText";
 
 export const INDENT_PX = 24;
 const SAVE_DELAY_MS = 700;
-const LONG_PRESS_MS = 480;
 /** Two spaces (or one full-width space from a Chinese keyboard) at the start of a line indent it. */
 const INDENT_PREFIX = /^(?: {2}|\u3000)/;
 
@@ -30,6 +39,65 @@ export interface LineActions {
   removeEmpty: (task: Task) => void;
   openMenu: (task: Task) => void;
   ticked: (task: Task, done: boolean) => void;
+  /** A line (a task id, or "new") started or stopped being edited. */
+  editing: (id: string, on: boolean) => void;
+  /** The text and caret of the line being edited, whenever either changes. */
+  caret: (id: string, value: string, caret: number) => void;
+  /** Lets the toolbar change the text of a line while it is being edited. */
+  register: (id: string, editor: LineEditor | null) => void;
+  openImage: (task: Task, file: string) => void;
+}
+
+/** What the toolbar can do to the text of the line being edited. */
+export interface LineEditor {
+  /** Writes `text` in place of `start`..`end` and puts the caret after it. */
+  replace: (start: number, end: number, text: string) => void;
+  /** The text as typed so far and where the caret is. */
+  selection: () => { value: string; start: number; end: number };
+  /** The new line only: keeps what is typed there as a task (returns its id, or null when empty). */
+  commit?: () => string | null;
+}
+
+/** How the row is drawn while a line is being dragged. */
+export interface RowDrag {
+  /** This row is the one picked up. */
+  lifted: boolean;
+  /** How far the row is moved: the dragged one follows the finger, others slide aside. */
+  offset: number;
+  /** Some row is being dragged (others then animate). */
+  active: boolean;
+}
+
+/** Pointer handlers from `useReorder` for one row. */
+export type RowHandlers = Partial<
+  Pick<
+    React.HTMLAttributes<HTMLLIElement>,
+    "onPointerDown" | "onPointerMove" | "onPointerUp" | "onPointerCancel" | "onClickCapture"
+  >
+>;
+
+/** The place in a text a point on the screen falls on, read off the copy of the text drawn under the textarea. */
+export function caretFromPoint(container: HTMLElement, x: number, y: number): number | null {
+  const doc = document as Document & {
+    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+  };
+  // Firefox and newer Chrome have the first, Safari the second.
+  const position = doc.caretPositionFromPoint
+    ? doc.caretPositionFromPoint(x, y)
+    : doc.caretRangeFromPoint?.(x, y);
+  if (!position) return null;
+  const [node, offset] =
+    "offsetNode" in position
+      ? [position.offsetNode, position.offset]
+      : [position.startContainer, position.startOffset];
+  let total = 0;
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+    if (text === node) return total + offset;
+    total += (text as Text).length;
+  }
+  return null;
 }
 
 interface EditorKeys {
@@ -100,42 +168,6 @@ function useFocusRequest(
   }, [request?.seq]);
 }
 
-/** Long press (touch) calls `onLong`; a short tap calls `onTap`. */
-function useLongPress(onLong: () => void, onTap: () => void) {
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const fired = useRef(false);
-  const start = useRef({ x: 0, y: 0 });
-  const clear = () => {
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = null;
-  };
-  return {
-    onPointerDown: (event: React.PointerEvent) => {
-      fired.current = false;
-      start.current = { x: event.clientX, y: event.clientY };
-      clear();
-      timer.current = setTimeout(() => {
-        fired.current = true;
-        onLong();
-      }, LONG_PRESS_MS);
-    },
-    onPointerMove: (event: React.PointerEvent) => {
-      if (Math.hypot(event.clientX - start.current.x, event.clientY - start.current.y) > 8) clear();
-    },
-    onPointerUp: clear,
-    onPointerCancel: clear,
-    onClick: () => {
-      if (!fired.current) onTap();
-    },
-    onContextMenu: (event: React.MouseEvent) => {
-      event.preventDefault();
-      clear();
-      if (!fired.current) onLong();
-      fired.current = true;
-    },
-  };
-}
-
 /** The inline "how long did it take" box after a finished line. */
 export function DurationInput({
   initial,
@@ -179,6 +211,21 @@ export function DurationInput({
   );
 }
 
+/** Puts the caret at `caret` once React has drawn the new text. */
+function placeCaret(ref: React.RefObject<HTMLTextAreaElement | null>, caret: number) {
+  requestAnimationFrame(() => ref.current?.setSelectionRange(caret, caret));
+}
+
+const dragStyle = (indent: number, drag: RowDrag | undefined): CSSProperties => ({
+  paddingLeft: indent * INDENT_PX,
+  ...(drag?.active
+    ? {
+        transform: drag.offset ? `translateY(${drag.offset}px)` : undefined,
+        transition: drag.lifted ? "none" : "transform 160ms ease",
+      }
+    : {}),
+});
+
 export function TaskRow({
   task,
   tagColors,
@@ -188,6 +235,9 @@ export function TaskRow({
   nextId,
   showTimeHint,
   now,
+  drag,
+  handlers,
+  uploading = 0,
 }: {
   task: Task;
   tagColors: TagColors;
@@ -197,15 +247,23 @@ export function TaskRow({
   nextId: string;
   showTimeHint: boolean;
   now: number;
+  drag?: RowDrag;
+  handlers?: RowHandlers;
+  /** Pictures on their way to the server for this line. */
+  uploading?: number;
 }) {
   const { engine } = useApp();
   const ref = useRef<HTMLTextAreaElement>(null);
+  const copy = useRef<HTMLSpanElement>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(task.data.text);
   const [askTime, setAskTime] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touch = useRef(false);
   const text = editing ? draft : task.data.text;
-  const { done, indent, highlight, duration } = task.data;
+  const { done, indent, highlight, highlightStyle, duration } = task.data;
+  const todo = isTodo(task);
+  const images = imagesOf(task);
 
   useFocusRequest(ref, task.id, focusRequest);
 
@@ -243,56 +301,113 @@ export function TaskRow({
       return;
     }
     const { levels, text: value } = takeIndent(raw);
+    const at = Math.max(0, caret - (raw.length - value.length));
     if (levels > 0) {
       setIndent(clampIndent(indent + levels));
-      requestAnimationFrame(() => {
-        const start = Math.max(0, caret - (raw.length - value.length));
-        ref.current?.setSelectionRange(start, start);
-      });
+      placeCaret(ref, at);
     }
     setDraft(value);
+    actions.caret(task.id, value, at);
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => save(value), SAVE_DELAY_MS);
   };
+
+  // The toolbar edits through this; `latest` keeps it reading this render's text.
+  const latest = useRef({ text, onChange });
+  useEffect(() => {
+    latest.current = { text, onChange };
+  });
+  useEffect(() => {
+    actions.register(task.id, {
+      replace: (start, end, insert) => {
+        const value = latest.current.text;
+        latest.current.onChange(
+          value.slice(0, start) + insert + value.slice(end),
+          start + insert.length
+        );
+        placeCaret(ref, start + insert.length);
+      },
+      selection: () => ({
+        value: latest.current.text,
+        start: ref.current?.selectionStart ?? latest.current.text.length,
+        end: ref.current?.selectionEnd ?? latest.current.text.length,
+      }),
+    });
+    return () => actions.register(task.id, null);
+    // Registered once per line; the handle reads `latest`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task.id]);
 
   const tick = () => {
     const nowDone = toggleTask(engine, task.id, now);
     actions.ticked(task, nowDone);
   };
-  const press = useLongPress(
-    () => actions.openMenu(task),
-    () => tick()
-  );
+
+  /** A tap on the words of a line not being edited: edit it, with the caret where the finger was. */
+  const editAt = (event: React.MouseEvent) => {
+    const area = ref.current;
+    if (!area || editing) return;
+    const target = event.target as HTMLElement;
+    if (target.closest("button, input")) return;
+    const at = copy.current ? caretFromPoint(copy.current, event.clientX, event.clientY) : null;
+    area.focus();
+    const caret = Math.min(at ?? area.value.length, area.value.length);
+    area.setSelectionRange(caret, caret);
+  };
 
   return (
     <li
-      className="group relative flex items-start gap-3 py-[5px] pr-1"
-      style={{ paddingLeft: indent * INDENT_PX }}
+      data-task-id={task.id}
+      className={`group relative flex items-start gap-3 py-[5px] pr-1 ${
+        editing ? "" : "no-callout select-none"
+      } ${drag?.lifted ? "bg-surface z-20 rounded-lg shadow-lg ring-1 ring-black/5" : ""}`}
+      style={dragStyle(indent, drag)}
+      {...handlers}
+      onPointerDown={(event) => {
+        touch.current = event.pointerType === "touch";
+        handlers?.onPointerDown?.(event);
+      }}
+      onClick={editAt}
       onContextMenu={(event) => {
-        if (event.target === ref.current) return;
+        // A long press on a phone is a drag, not a menu.
+        if (touch.current) return event.preventDefault();
+        if (event.target === ref.current && editing) return;
         event.preventDefault();
         actions.openMenu(task);
       }}
     >
-      <button
-        type="button"
-        aria-label={done ? "标为未完成" : "标为完成"}
-        aria-pressed={done}
-        className="flex h-6 w-5 shrink-0 touch-manipulation items-center justify-center select-none"
-        {...press}
-      >
-        <TaskMark done={done} />
-      </button>
+      {todo ? (
+        <button
+          type="button"
+          aria-label={done ? "标为未完成" : "标为完成"}
+          aria-pressed={done}
+          className="flex h-[var(--list-leading)] w-5 shrink-0 touch-manipulation items-center justify-center select-none"
+          onClick={tick}
+        >
+          <TaskMark done={done} />
+        </button>
+      ) : (
+        <span
+          className="flex h-[var(--list-leading)] w-5 shrink-0 items-center justify-center"
+          aria-label={markOf(task) === "dot" ? "圆点" : "横线"}
+          role="img"
+        >
+          <TaskMark done={false} mark={markOf(task)} />
+        </span>
+      )}
       <div
-        className={`min-w-0 flex-1 text-[15px] leading-6 ${done ? "text-muted" : ""}`}
-        onClick={(event) => {
-          if (event.target === event.currentTarget) ref.current?.focus();
-        }}
+        className={`min-w-0 flex-1 text-[length:var(--list-size)] leading-[var(--list-leading)] ${done ? "text-muted" : ""}`}
       >
         <span className="line-edit max-w-full min-w-[2em] align-top">
-          <span aria-hidden="true">
-            <TaskWords text={text} highlight={highlight} tagColors={tagColors} muted={done} />
-            {"​"}
+          <span aria-hidden="true" ref={copy}>
+            <TaskWords
+              text={text}
+              highlight={highlight}
+              highlightStyle={highlightStyle}
+              tagColors={tagColors}
+              muted={done}
+            />
+            {"\u200b"}
           </span>
           <textarea
             ref={ref}
@@ -300,16 +415,21 @@ export function TaskRow({
             value={text}
             aria-label="任务"
             spellCheck={false}
-            className={done ? "caret-[var(--moli-muted)]" : ""}
+            className={`${done ? "caret-[var(--moli-muted)]" : ""} ${editing ? "" : "pointer-events-none"}`}
             onFocus={() => {
               setDraft(task.data.text);
               setEditing(true);
+              actions.editing(task.id, true);
             }}
             onBlur={() => {
               setEditing(false);
-              if (draft.trim() === "") deleteTask(engine, task.id);
+              actions.editing(task.id, false);
+              if (draft.trim() === "" && images.length === 0) deleteTask(engine, task.id);
               else if (draft !== task.data.text) save(draft);
             }}
+            onSelect={(event) =>
+              actions.caret(task.id, event.currentTarget.value, event.currentTarget.selectionStart)
+            }
             onChange={(event) => onChange(event.target.value, event.target.selectionStart)}
             onKeyDown={(event) =>
               handleKeys(event, {
@@ -324,17 +444,17 @@ export function TaskRow({
             }
           />
         </span>
-        {done && duration !== null && !askTime && (
+        {todo && done && duration !== null && !askTime && (
           <button
             type="button"
             onClick={() => setAskTime(true)}
-            className="text-muted ml-2 align-top font-serif text-[14px] whitespace-nowrap"
+            className="text-muted ml-2 align-top font-serif text-[0.92em] whitespace-nowrap"
             aria-label={`用时 ${formatDuration(duration)}，点击修改`}
           >
             {formatDuration(duration)}
           </button>
         )}
-        {done && duration === null && !askTime && (
+        {todo && done && duration === null && !askTime && (
           <button
             type="button"
             onClick={() => setAskTime(true)}
@@ -356,60 +476,121 @@ export function TaskRow({
             }}
           />
         )}
+        {(images.length > 0 || uploading > 0) && (
+          <div className="mt-1.5 mb-1 flex flex-wrap gap-1.5">
+            {images.map((file, i) => (
+              <button
+                key={file}
+                type="button"
+                aria-label={`看第 ${i + 1} 张图片`}
+                onClick={() => actions.openImage(task, file)}
+                className="bg-surface-2 no-callout h-14 w-14 overflow-hidden rounded-lg"
+              >
+                <img
+                  src={fileUrl(file)}
+                  alt=""
+                  draggable={false}
+                  loading="lazy"
+                  className="h-full w-full object-cover"
+                />
+              </button>
+            ))}
+            {Array.from({ length: uploading }, (_, i) => (
+              <span
+                key={`up${i}`}
+                role="status"
+                aria-label="图片上传中"
+                className="bg-surface-2 h-14 w-14 animate-pulse rounded-lg"
+              />
+            ))}
+          </div>
+        )}
       </div>
-      <button
-        type="button"
-        aria-label="更多"
-        onMouseDown={(event) => event.preventDefault()}
-        onClick={() => actions.openMenu(task)}
-        className="text-muted hover:text-text flex h-6 w-6 shrink-0 items-center justify-center rounded opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 focus:opacity-100"
-      >
-        <MoreHorizontal size={16} aria-hidden="true" />
-      </button>
     </li>
   );
 }
 
-/** The empty line at the bottom: typing there adds a task. */
+/** The empty line at the bottom: typing there adds a task. Its indent and mark live in the page (the toolbar sets them). */
 export function NewTaskRow({
   focusRequest,
   lastId,
   onAdd,
   onFocusLast,
-  indentHint,
+  indent,
+  setIndent,
+  mark,
+  actions,
 }: {
   focusRequest: FocusRequest | null;
   lastId: string | null;
-  onAdd: (text: string, indent: number) => void;
+  onAdd: (text: string, indent: number, mark: Mark) => string;
   onFocusLast: () => void;
-  indentHint: number;
+  indent: number;
+  setIndent: (indent: number) => void;
+  mark: Mark;
+  actions: Pick<LineActions, "editing" | "caret" | "register">;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const [draft, setDraft] = useState("");
-  const [indent, setIndent] = useState<number | null>(null);
-  const level = indent ?? indentHint;
   useFocusRequest(ref, "new", focusRequest);
 
-  const add = (value: string) => {
-    if (value.trim() === "") return;
-    onAdd(value, level);
+  const add = (value: string): string | null => {
+    if (value.trim() === "") return null;
+    const id = onAdd(value, indent, mark);
     setDraft("");
-    setIndent(level);
+    actions.caret("new", "", 0);
+    return id;
   };
+
+  const change = (raw: string, caret: number) => {
+    if (raw.includes("\n")) {
+      add(raw.replace(/\n/g, ""));
+      return;
+    }
+    const { levels, text } = takeIndent(raw);
+    if (levels > 0) setIndent(clampIndent(indent + levels));
+    setDraft(text);
+    actions.caret("new", text, Math.max(0, caret - (raw.length - text.length)));
+  };
+
+  const latest = useRef({ draft, change, add });
+  useEffect(() => {
+    latest.current = { draft, change, add };
+  });
+  useEffect(() => {
+    actions.register("new", {
+      replace: (start, end, insert) => {
+        const value = latest.current.draft;
+        latest.current.change(
+          value.slice(0, start) + insert + value.slice(end),
+          start + insert.length
+        );
+        placeCaret(ref, start + insert.length);
+      },
+      selection: () => ({
+        value: latest.current.draft,
+        start: ref.current?.selectionStart ?? latest.current.draft.length,
+        end: ref.current?.selectionEnd ?? latest.current.draft.length,
+      }),
+      commit: () => latest.current.add(latest.current.draft),
+    });
+    return () => actions.register("new", null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <li
       className="flex items-start gap-3 py-[5px] pr-1"
-      style={{ paddingLeft: level * INDENT_PX }}
+      style={{ paddingLeft: indent * INDENT_PX }}
       onClick={() => ref.current?.focus()}
     >
-      <span className="flex h-6 w-5 shrink-0 items-center justify-center opacity-40">
-        <TaskMark done={false} />
+      <span className="flex h-[var(--list-leading)] w-5 shrink-0 items-center justify-center opacity-40">
+        <TaskMark done={false} mark={mark} />
       </span>
-      <span className="line-edit block min-w-0 flex-1 text-[15px] leading-6">
+      <span className="line-edit block min-w-0 flex-1 text-[length:var(--list-size)] leading-[var(--list-leading)]">
         <span aria-hidden="true">
           {draft}
-          {"​"}
+          {"\u200b"}
         </span>
         <textarea
           ref={ref}
@@ -417,25 +598,22 @@ export function NewTaskRow({
           value={draft}
           aria-label="新任务"
           spellCheck={false}
-          placeholder="两个空格缩进，退格回退"
-          onBlur={() => add(draft)}
-          onChange={(event) => {
-            const raw = event.target.value;
-            if (raw.includes("\n")) {
-              add(raw.replace(/\n/g, ""));
-              return;
-            }
-            const { levels, text } = takeIndent(raw);
-            if (levels > 0) setIndent(clampIndent(level + levels));
-            setDraft(text);
+          onFocus={() => actions.editing("new", true)}
+          onBlur={() => {
+            actions.editing("new", false);
+            add(draft);
           }}
+          onSelect={(event) =>
+            actions.caret("new", event.currentTarget.value, event.currentTarget.selectionStart)
+          }
+          onChange={(event) => change(event.target.value, event.target.selectionStart)}
           onKeyDown={(event) =>
             handleKeys(event, {
               value: draft,
-              indent: level,
+              indent,
               setIndent,
               onEnter: (before, rest) => {
-                if (draft.trim() === "" && level > 0) setIndent(level - 1);
+                if (draft.trim() === "" && indent > 0) setIndent(indent - 1);
                 else add(before + rest);
               },
               onBackspaceEmpty: () => lastId && onFocusLast(),

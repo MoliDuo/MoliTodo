@@ -14,11 +14,42 @@ export const COVERS = [
 
 export const UPLOAD = "upload";
 
-/** The picture for a cover choice; an upload that is not there (yet) falls back to the first painting. */
-export function coverSrc(choice: string, uploaded: string | null): string {
-  if (choice === UPLOAD && uploaded) return uploaded;
-  const cover = COVERS.find((c) => c.id === choice) ?? COVERS[0];
-  return `/covers/${cover.id}.webp`;
+/** An uploaded cover as the picker and the book see it (see `uploadedCovers` in model.ts). */
+export interface Upload {
+  choice: string;
+  image: string;
+}
+
+/** The paintings she has not removed. */
+export const visibleCovers = (hidden: readonly string[] = []) =>
+  COVERS.filter((cover) => !hidden.includes(cover.id));
+
+/**
+ * The picture for a cover choice. A choice that is gone (a removed painting, an upload not there yet) falls back
+ * to the first painting still shown, then to her first upload, then to the very first painting.
+ */
+export function coverSrc(
+  choice: string,
+  uploads: Upload[],
+  hidden: readonly string[] = []
+): string {
+  const upload = uploads.find((u) => u.choice === choice);
+  if (upload) return upload.image;
+  const shown = visibleCovers(hidden);
+  const cover = shown.find((c) => c.id === choice) ?? shown[0];
+  if (cover) return `/covers/${cover.id}.webp`;
+  return uploads[0]?.image ?? `/covers/${COVERS[0].id}.webp`;
+}
+
+/** What to choose after `removed` goes: the first painting still shown, else the first upload left. */
+export function fallbackChoice(
+  removed: string,
+  uploads: Upload[],
+  hidden: readonly string[]
+): string {
+  const painting = visibleCovers(hidden).find((c) => c.id !== removed);
+  if (painting) return painting.id;
+  return uploads.find((u) => u.choice !== removed)?.choice ?? COVERS[0].id;
 }
 
 export const COVER_WIDTH = 600;
