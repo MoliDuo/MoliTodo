@@ -1,6 +1,7 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import {
   canTurn,
+  cornerDelta,
   dragPoint,
   endTurn,
   facesAt,
@@ -23,6 +24,7 @@ import {
   turnedPoint,
   type Curl,
   type Point,
+  type Strip,
 } from "../lib/page-curl";
 
 /** How far a finger must move before it counts as turning a page rather than a tap. */
@@ -30,6 +32,15 @@ const DRAG_START_PX = 8;
 const TAP_MS = 450;
 /** Near the corner, a mouse lifts it a little, to show the page can be turned. */
 const PEEK_PX = 64;
+/** The spring that carries a page the rest of the way once let go (1/s); quicker in a run of turns. */
+const SPRING = 12;
+const SPRING_QUICK = 18;
+/** However it was let go, a page has settled by then. */
+const SETTLE_MS = 900;
+/** A lifted corner follows the mouse this lazily (ms, time constant). */
+const FOLLOW_MS = 60;
+/** A finger held still this long before letting go has no speed left to give the page. */
+const STILL_MS = 80;
 
 export interface StageGeometry {
   /** One page's size. */
@@ -46,8 +57,9 @@ interface Drag {
   last: Point;
   lastTime: number;
   startTime: number;
-  velocity: number;
-  /** Set once the finger has moved far enough sideways. */
+  /** The finger's speed, in stage pixels per ms, smoothed. */
+  velocity: Point;
+  /** Set once the finger has moved far enough sideways, or at once when it caught a turning page. */
   turn: Turn | null;
   /** The turn's point when the drag took it over. */
   base: Turn | null;
@@ -55,9 +67,50 @@ interface Drag {
   scrolling: boolean;
 }
 
+/** The finger's speed as it lets go: none if it had stopped first. */
+const letGoSpeed = (d: Drag): Point =>
+  performance.now() - d.lastTime > STILL_MS ? { x: 0, y: 0 } : d.velocity;
+
+/** What is moving the page without a finger on it: a turn finishing, or a corner following the mouse. */
+type Motion = { kind: "finish"; from: Turn } | { kind: "follow"; target: Point; flat: boolean };
+
+const sameFace = (a: Face, b: Face) =>
+  a.type === b.type &&
+  (a.type !== "page" || a.index === (b as typeof a).index) &&
+  (a.type !== "blank" || a.ghost === (b as typeof a).ghost);
+
+/** A face's contents, drawn again only when it shows something else: a turn moves only what holds it. */
+const FaceView = memo(
+  function FaceView({
+    face,
+    side,
+    render,
+  }: {
+    face: Face;
+    side: "left" | "right";
+    render: (face: Face, side: "left" | "right") => ReactNode;
+  }) {
+    return render(face, side);
+  },
+  (a, b) => a.side === b.side && a.render === b.render && sameFace(a.face, b.face)
+);
+
+/** Angles round the roll, from its top (where the back lies flat again) to its outer edge. */
+const ROLL_STOPS = Array.from({ length: 9 }, (_, i) => Math.PI - (i * Math.PI) / 16);
+/** Across the inside of the roll, from where it leaves the page to its outer edge (0 to 1). */
+const INSIDE_STOPS = [0, 0.5, 0.75, 0.9, 1];
+
+/** Gradient stops along the roll, from where it starts to its outer edge. */
+const stops = (color: string, list: { offset: number; opacity: number }[]) =>
+  list.map(({ offset, opacity }, i) => (
+    <stop key={i} offset={offset} stopColor={color} stopOpacity={opacity} />
+  ));
+
 /**
- * Light on a turning page, drawn over the stage: the shadow the lifted part casts on the page it uncovers
- * ("under"), or the shine and shade along its own fold ("flap").
+ * Light on a turning page, drawn over the stage in three layers. "under": the shadow the lifted part casts on
+ * the pages below it. "inside": the inside of the roll, where it shows past the page's edges, bright where it
+ * leaves the page and in shade towards the top. "over": the back going over the roll, lit like a cylinder (dark
+ * towards the outer edge, a shine near the top), and the flat part of the back past it.
  */
 function Shading({
   c,
@@ -70,14 +123,137 @@ function Shading({
   w: number;
   h: number;
   point: Point;
-  layer: "under" | "flap";
+  layer: "under" | "inside" | "over";
 }) {
   const id = useId().replace(/:/g, "");
+  const n = c.normal;
+  const r = c.radius;
   const middle = { x: (c.fold[0].x + c.fold[1].x) / 2, y: (c.fold[0].y + c.fold[1].y) / 2 };
   const reach = Math.max(1, Math.hypot(point.x - middle.x, point.y - middle.y));
-  const fall = Math.min(w * 0.5, Math.max(18, reach * 0.7));
-  const strength = Math.min(1, reach / 30) * (1 - c.progress * 0.55);
-  const n = c.normal;
+  const lift = Math.sin(Math.PI * c.progress);
+  // The roll's outer edge, where the page underneath starts to show.
+  const edge = { x: c.roll.x + n.x * r, y: c.roll.y + n.y * r };
+  const across = { x1: c.roll.x, y1: c.roll.y, x2: edge.x, y2: edge.y };
+  const parts = (face: "front" | "back") =>
+    c.strips.filter((s) => s.face === face && s.area.length >= 3);
+  const back = parts("back");
+  /** Fills the given parts of the roll as one shape, so slices overlapping at their seams show no lines. */
+  const fill = (key: string, list: typeof back, paint: string) => (
+    <>
+      <clipPath id={`${id}-${key}-clip`}>
+        {list.map((s, i) => (
+          <polygon key={i} points={pointsAttr(s.area)} />
+        ))}
+      </clipPath>
+      <rect
+        x={-2 * w}
+        y={-h}
+        width={4 * w}
+        height={3 * h}
+        clipPath={`url(#${id}-${key}-clip)`}
+        fill={paint}
+      />
+    </>
+  );
+
+  let content: ReactNode;
+  if (layer === "under") {
+    const fall = Math.min(w * 0.5, Math.max(18, reach * 0.7)) + r;
+    const strength = Math.min(1, reach / 30) * (1 - c.progress * 0.55);
+    content = (
+      <>
+        <defs>
+          <linearGradient
+            id={`${id}-under`}
+            gradientUnits="userSpaceOnUse"
+            x1={edge.x}
+            y1={edge.y}
+            x2={edge.x + n.x * fall}
+            y2={edge.y + n.y * fall}
+          >
+            <stop offset="0" stopColor="#000" stopOpacity={0.42 * strength} />
+            <stop offset="0.35" stopColor="#000" stopOpacity={0.12 * strength} />
+            <stop offset="1" stopColor="#000" stopOpacity="0" />
+          </linearGradient>
+          <filter id={`${id}-blur`} x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation={1.5 + r * 0.12 + 4 * lift} />
+          </filter>
+        </defs>
+        <polygon points={pointsAttr(c.uncovered)} fill={`url(#${id}-under)`} />
+        <g
+          filter={`url(#${id}-blur)`}
+          opacity={0.2 + 0.1 * lift}
+          transform={`translate(0 ${1 + r * 0.1 + 2 * lift})`}
+        >
+          <polygon points={pointsAttr(c.flap)} />
+          {back.map((s, i) => (
+            <polygon key={i} points={pointsAttr(s.area)} />
+          ))}
+        </g>
+      </>
+    );
+  } else if (layer === "inside") {
+    content = r > 0 && (
+      <>
+        <linearGradient id={`${id}-inside`} gradientUnits="userSpaceOnUse" {...across}>
+          {stops(
+            "#000",
+            INSIDE_STOPS.map((o) => ({
+              offset: o,
+              opacity: 0.05 + 0.3 * (1 - Math.sqrt(1 - o * o)),
+            }))
+          )}
+        </linearGradient>
+        {fill("inside", parts("front"), `url(#${id}-inside)`)}
+      </>
+    );
+  } else {
+    // Folded flat (no roll yet, or none left) the fold is a crease: a dark line and a shine just past it.
+    const crease = 1 - Math.min(1, r / 8);
+    content = (
+      <>
+        <linearGradient
+          id={`${id}-flap`}
+          gradientUnits="userSpaceOnUse"
+          x1={c.roll.x}
+          y1={c.roll.y}
+          x2={c.roll.x - n.x * reach}
+          y2={c.roll.y - n.y * reach}
+        >
+          <stop offset="0" stopColor="#000" stopOpacity={0.16 * crease} />
+          <stop offset="0.05" stopColor="#fff" stopOpacity={0.3 * crease} />
+          <stop offset="0.22" stopColor="#fff" stopOpacity="0" />
+          <stop offset="0.7" stopColor="#000" stopOpacity="0.03" />
+          <stop offset="1" stopColor="#000" stopOpacity="0.09" />
+        </linearGradient>
+        <polygon points={pointsAttr(c.flap)} fill={`url(#${id}-flap)`} />
+        {r > 0 && (
+          <>
+            <linearGradient id={`${id}-shade`} gradientUnits="userSpaceOnUse" {...across}>
+              {stops("#000", [
+                ...ROLL_STOPS.map((a) => ({
+                  offset: Math.sin(a),
+                  opacity: 0.34 * (1 + Math.cos(a)) ** 1.1,
+                })),
+                { offset: 1, opacity: 0.42 },
+              ])}
+            </linearGradient>
+            <linearGradient id={`${id}-shine`} gradientUnits="userSpaceOnUse" {...across}>
+              {stops(
+                "#fff",
+                ROLL_STOPS.map((a) => ({
+                  offset: Math.sin(a),
+                  opacity: 0.45 * Math.exp(-(((a / Math.PI - 0.8) / 0.08) ** 2)),
+                }))
+              )}
+            </linearGradient>
+            {fill("shade", back, `url(#${id}-shade)`)}
+            {fill("shine", back, `url(#${id}-shine)`)}
+          </>
+        )}
+      </>
+    );
+  }
   return (
     <svg
       className="pointer-events-none absolute top-0 overflow-visible"
@@ -87,39 +263,7 @@ function Shading({
       viewBox={`${-w} 0 ${2 * w} ${h}`}
       aria-hidden="true"
     >
-      <defs>
-        <linearGradient
-          id={`${id}-under`}
-          gradientUnits="userSpaceOnUse"
-          x1={middle.x}
-          y1={middle.y}
-          x2={middle.x + n.x * fall}
-          y2={middle.y + n.y * fall}
-        >
-          <stop offset="0" stopColor="#000" stopOpacity={0.42 * strength} />
-          <stop offset="0.35" stopColor="#000" stopOpacity={0.12 * strength} />
-          <stop offset="1" stopColor="#000" stopOpacity="0" />
-        </linearGradient>
-        <linearGradient
-          id={`${id}-flap`}
-          gradientUnits="userSpaceOnUse"
-          x1={middle.x}
-          y1={middle.y}
-          x2={middle.x - n.x * reach}
-          y2={middle.y - n.y * reach}
-        >
-          <stop offset="0" stopColor="#000" stopOpacity="0.16" />
-          <stop offset="0.05" stopColor="#fff" stopOpacity="0.35" />
-          <stop offset="0.22" stopColor="#fff" stopOpacity="0" />
-          <stop offset="0.7" stopColor="#000" stopOpacity="0.03" />
-          <stop offset="1" stopColor="#000" stopOpacity="0.09" />
-        </linearGradient>
-      </defs>
-      {layer === "under" ? (
-        <polygon points={pointsAttr(c.uncovered)} fill={`url(#${id}-under)`} />
-      ) : (
-        <polygon points={pointsAttr(c.flap)} fill={`url(#${id}-flap)`} />
-      )}
+      {content}
     </svg>
   );
 }
@@ -180,13 +324,19 @@ export function BookStage({
 }) {
   const { w, h } = geometry;
   const [turn, setTurn] = useState<Turn | null>(null);
-  const [peek, setPeek] = useState(false);
+  /** The turn on show, for handlers that run before React has drawn it. */
+  const shown = useRef<Turn | null>(null);
+  /** The corner is lifted under a resting mouse. */
+  const peeking = useRef(false);
+  /** A turn asked for while another was still going: done next. */
+  const queued = useRef<Direction | null>(null);
+  const motion = useRef<Motion | null>(null);
   const drag = useRef<Drag | null>(null);
   const frame = useRef<number | null>(null);
   const element = useRef<HTMLDivElement>(null);
-  const live = useRef({ position, turn, pages, layout });
+  const live = useRef({ position, pages, layout });
   useLayoutEffect(() => {
-    live.current = { position, turn, pages, layout };
+    live.current = { position, pages, layout };
   });
 
   useEffect(
@@ -196,47 +346,122 @@ export function BookStage({
     []
   );
 
-  const animating = () => frame.current !== null;
+  const show = (next: Turn | null) => {
+    shown.current = next;
+    setTurn(next);
+  };
 
-  /** Lets the page fall the rest of the way, along an arc when it goes over. */
-  const finish = (from: Turn, end: "turned" | "flat") => {
+  const stop = () => {
+    if (frame.current !== null) cancelAnimationFrame(frame.current);
+    frame.current = null;
+    motion.current = null;
+  };
+
+  const turning = () => motion.current?.kind === "finish";
+
+  /**
+   * Lets the page go the rest of the way, on a spring that starts at the finger's speed (stage pixels per ms),
+   * along an arc when it goes over.
+   */
+  const finish = (
+    from: Turn,
+    end: "turned" | "flat",
+    velocity: Point = { x: 0, y: 0 },
+    quick = false
+  ) => {
+    stop();
+    peeking.current = false;
     const target =
       end === "turned" ? turnedPoint(from.corner, w, h) : cornerPoint(from.corner, w, h);
     const done = () => {
-      frame.current = null;
-      setTurn(null);
-      setPeek(false);
+      stop();
+      show(null);
       onPosition(endTurn(from, end));
     };
-    const distance = Math.hypot(target.x - from.point.x, target.y - from.point.y);
+    const path = { x: target.x - from.point.x, y: target.y - from.point.y };
+    const distance = Math.hypot(path.x, path.y);
     if (reducedMotion || distance < 1) return done();
-    const crossing = Math.abs(target.x - from.point.x) > w * 0.6;
+    const crossing = Math.abs(path.x) > w * 0.6;
     const lift = crossing ? h * 0.1 * (from.corner === "bottom" ? 1 : -1) : 0;
-    const duration = Math.min(720, 240 + (distance / (2 * w)) * 520);
+    const spring = quick ? SPRING_QUICK : SPRING;
+    // The finger's speed along the way the corner has to go, in whole journeys per second.
+    const v = cornerDelta(from, velocity);
+    const speed = Math.min(
+      4 * spring,
+      Math.max(0, (((v.x * path.x + v.y * path.y) / distance) * 1000) / distance)
+    );
     const startedAt = performance.now();
+    motion.current = { kind: "finish", from };
     const step = (now: number) => {
-      const t = Math.min(1, (now - startedAt) / duration);
-      const point = clampPoint(arcPoint(from.point, target, t, lift), from.corner, w, h);
-      setTurn({ ...from, point });
-      if (t < 1) frame.current = requestAnimationFrame(step);
-      else done();
+      const t = Math.max(0, now - startedAt) / 1000;
+      // A critically damped spring from 0 to 1: how much of the way is still to go.
+      const left = (1 + (spring - speed) * t) * Math.exp(-spring * t);
+      if (now - startedAt >= SETTLE_MS || left * distance < 0.5) return done();
+      const point = clampPoint(arcPoint(from.point, target, 1 - left, lift), from.corner, w, h);
+      show({ ...from, point });
+      frame.current = requestAnimationFrame(step);
     };
     frame.current = requestAnimationFrame(step);
   };
 
-  /** A page turned all the way by a tap, a key or the wheel. */
-  const turnPage = (direction: Direction) => {
+  /** Moves a lifted corner smoothly to `target`; `flat` lays it down and lets go of it there. */
+  const follow = (target: Point, flat: boolean) => {
+    if (turning()) return;
+    const running = motion.current?.kind === "follow";
+    motion.current = { kind: "follow", target, flat };
+    if (running) return;
+    let last = performance.now();
+    const step = (now: number) => {
+      frame.current = null;
+      const m = motion.current;
+      const current = shown.current;
+      if (m?.kind !== "follow" || !current) return;
+      const k = 1 - Math.exp(-Math.max(0, now - last) / FOLLOW_MS);
+      last = now;
+      const d = { x: m.target.x - current.point.x, y: m.target.y - current.point.y };
+      const arrived = Math.hypot(d.x, d.y) * (1 - k) < 0.3;
+      if (arrived) {
+        motion.current = null;
+        if (m.flat) {
+          peeking.current = false;
+          return show(null);
+        }
+        return show({ ...current, point: m.target });
+      }
+      show({ ...current, point: { x: current.point.x + d.x * k, y: current.point.y + d.y * k } });
+      frame.current = requestAnimationFrame(step);
+    };
+    frame.current = requestAnimationFrame(step);
+  };
+
+  /** A page turned all the way by a tap, a key or the wheel; one asked for during a turn waits for it. */
+  const turnPage = (direction: Direction, quick = false) => {
     const { position: at, pages: count, layout: shape } = live.current;
-    if (animating() || drag.current?.turn || !canTurn(shape, count, at, direction)) return;
+    if (drag.current?.turn) return;
+    if (turning()) {
+      queued.current = direction;
+      return;
+    }
+    if (!canTurn(shape, count, at, direction)) return;
     const start = startTurn(shape, at, direction, "bottom", w, h);
-    // Start just off the corner so the page lifts at once.
+    // A corner already lifted under the mouse goes on from there; otherwise start just off the corner so the
+    // page lifts at once.
+    const lifted = peeking.current && direction === "next" ? shown.current : null;
     const nudge = start.reverse ? { x: 12, y: -10 } : { x: -12, y: -10 };
-    const lifted = {
+    const from = lifted ?? {
       ...start,
       point: clampPoint({ x: start.point.x + nudge.x, y: start.point.y + nudge.y }, "bottom", w, h),
     };
-    finish(lifted, start.reverse ? "flat" : "turned");
+    finish(from, start.reverse ? "flat" : "turned", { x: 0, y: 0 }, quick);
   };
+
+  // Once a turn is over, the one asked for meanwhile.
+  useEffect(() => {
+    if (turn || motion.current || !queued.current) return;
+    const next = queued.current;
+    queued.current = null;
+    turnPage(next, true);
+  });
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -260,18 +485,27 @@ export function BookStage({
   };
 
   const onPointerDown = (event: React.PointerEvent) => {
-    if (animating() || event.button > 0) return;
+    if (event.button > 0) return;
     const p = toStage(event);
     const now = performance.now();
+    const m = motion.current;
+    // A page still turning is caught where it is, and the finger carries on with it.
+    const caught = m?.kind === "finish" ? (shown.current ?? m.from) : null;
+    if (m) stop();
+    if (caught) {
+      queued.current = null;
+      show(caught);
+      (event.currentTarget as Element).setPointerCapture?.(event.pointerId);
+    }
     drag.current = {
       id: event.pointerId,
       start: p,
       last: p,
       lastTime: now,
       startTime: event.timeStamp,
-      velocity: 0,
-      turn: null,
-      base: peek && turn ? turn : null,
+      velocity: { x: 0, y: 0 },
+      turn: caught,
+      base: !caught && peeking.current ? shown.current : null,
       scrolling: false,
     };
   };
@@ -281,7 +515,7 @@ export function BookStage({
     const d = drag.current;
     if (!d) {
       // A mouse resting near the bottom corner lifts it a little.
-      if (event.pointerType !== "mouse" || animating()) return;
+      if (event.pointerType !== "mouse" || turning()) return;
       const corner = cornerPoint("bottom", w, h);
       const near = Math.hypot(p.x - corner.x, p.y - corner.y) < PEEK_PX && p.x <= w && p.y <= h;
       if (near && canTurn(layout, pages, position, "next")) {
@@ -289,21 +523,21 @@ export function BookStage({
           x: corner.x + (p.x - corner.x) * 0.6 - 10,
           y: corner.y + (p.y - corner.y) * 0.6 - 8,
         };
-        setTurn({
-          ...startTurn(layout, position, "next", "bottom", w, h),
-          point: clampPoint(pull, "bottom", w, h),
-        });
-        setPeek(true);
-      } else if (peek) {
-        setTurn(null);
-        setPeek(false);
+        if (!peeking.current) show(startTurn(layout, position, "next", "bottom", w, h));
+        peeking.current = true;
+        follow(clampPoint(pull, "bottom", w, h), false);
+      } else if (peeking.current) {
+        follow(corner, true);
       }
       return;
     }
     if (d.id !== event.pointerId || d.scrolling) return;
     const now = performance.now();
     const dt = Math.max(1, now - d.lastTime);
-    d.velocity = 0.6 * ((p.x - d.last.x) / dt) + 0.4 * d.velocity;
+    d.velocity = {
+      x: 0.6 * ((p.x - d.last.x) / dt) + 0.4 * d.velocity.x,
+      y: 0.6 * ((p.y - d.last.y) / dt) + 0.4 * d.velocity.y,
+    };
     d.last = p;
     d.lastTime = now;
     const dx = p.x - d.start.x;
@@ -323,10 +557,10 @@ export function BookStage({
           ? d.base
           : startTurn(layout, position, direction, corner, w, h);
       d.start = p;
-      setPeek(false);
+      peeking.current = false;
       (event.currentTarget as Element).setPointerCapture?.(event.pointerId);
     }
-    setTurn({
+    show({
       ...d.turn,
       point: dragPoint(d.turn, { x: p.x - d.start.x, y: p.y - d.start.y }, w, h),
     });
@@ -337,9 +571,10 @@ export function BookStage({
     drag.current = null;
     if (!d || d.id !== event.pointerId) return;
     if (d.turn) {
-      const current = live.current.turn ?? d.turn;
+      const current = shown.current ?? d.turn;
       const progress = curl(current.point, current.corner, current.side, w, h)?.progress ?? 0;
-      finish(current, settle(current, progress, d.velocity));
+      const velocity = letGoSpeed(d);
+      finish(current, settle(current, progress, velocity.x), velocity);
       return;
     }
     const p = toStage(event);
@@ -351,12 +586,12 @@ export function BookStage({
   const onPointerCancel = () => {
     const d = drag.current;
     drag.current = null;
-    const current = live.current.turn;
+    const current = shown.current;
     if (d?.turn && current) finish(current, current.reverse ? "turned" : "flat");
   };
 
   const tap = (p: Point) => {
-    const shown = pagesAt(layout, pages, position);
+    const shownPages = pagesAt(layout, pages, position);
     if (p.x >= 0) {
       const at = p.x / w;
       if (at > 0.8) return turnPage("next");
@@ -366,7 +601,7 @@ export function BookStage({
       return;
     }
     if (layout === "single" || -p.x / w > 0.8) return turnPage("prev");
-    const left = shown.find((index) => index === position * 2 - 1);
+    const left = shownPages.find((index) => index === position * 2 - 1);
     if (left !== undefined) onTapPage(left);
   };
 
@@ -378,8 +613,48 @@ export function BookStage({
       : { x: -turn.point.x, y: turn.point.y }
     : null;
   const frontLeft = turn?.side === "left" ? -w : 0;
+  const backSide = turn?.side === "right" ? "left" : "right";
+  const { front, back } = faces;
   const pageBox = (left: number) =>
-    ({ position: "absolute", left, top: 0, width: w, height: h }) as const;
+    ({
+      position: "absolute",
+      left,
+      top: 0,
+      width: w,
+      height: h,
+      contain: "layout paint size",
+    }) as const;
+  /** A face placed by a matrix from its own coordinates and cut to what shows of it. */
+  const placed = (matrix: string, clip: string | undefined) =>
+    ({
+      ...pageBox(0),
+      transformOrigin: "0 0",
+      transform: matrix,
+      clipPath: clip,
+      visibility: clip ? undefined : "hidden",
+    }) as const;
+
+  /** One slice of the roll. */
+  const roll = (strip: Strip, i: number) =>
+    turn &&
+    front &&
+    back && (
+      <div
+        key={i}
+        className="pointer-events-none"
+        style={placed(
+          matrixCss(strip.matrix),
+          strip.clip.length >= 3 ? polygonCss(strip.clip) : undefined
+        )}
+        data-face="roll"
+      >
+        <FaceView
+          face={strip.face === "front" ? front : back}
+          side={strip.face === "front" ? turn.side : backSide}
+          render={renderFace}
+        />
+      </div>
+    );
 
   return (
     <div
@@ -390,10 +665,7 @@ export function BookStage({
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerCancel}
       onPointerLeave={() => {
-        if (peek && !drag.current) {
-          setTurn(null);
-          setPeek(false);
-        }
+        if (peeking.current && !drag.current) follow(cornerPoint("bottom", w, h), true);
       }}
       onWheel={(event) => {
         const now = performance.now();
@@ -405,15 +677,12 @@ export function BookStage({
       }}
       data-testid="book-stage"
     >
-      <div
-        className="absolute"
-        style={{ left: geometry.x, top: geometry.y, width: 0, height: h, perspective: 2400 }}
-      >
+      <div className="absolute" style={{ left: geometry.x, top: geometry.y, width: 0, height: h }}>
         {under}
         <Edge leaves={faces.leftLeaves} side="left" w={w} h={h} />
         <Edge leaves={faces.rightLeaves} side="right" w={w} h={h} />
         <div className="book-left" style={pageBox(-w)} data-face="left">
-          {renderFace(faces.left, "left")}
+          <FaceView face={faces.left} side="left" render={renderFace} />
         </div>
         <div
           key={reducedMotion ? `right-${position}` : "right"}
@@ -421,36 +690,30 @@ export function BookStage({
           style={pageBox(0)}
           data-face="right"
         >
-          {renderFace(faces.right, "right")}
+          <FaceView face={faces.right} side="right" render={renderFace} />
         </div>
-        {turn && faces.front && !c && (
-          <div style={pageBox(frontLeft)}>{renderFace(faces.front, turn.side)}</div>
+        {turn && front && !c && (
+          <div style={pageBox(frontLeft)}>
+            <FaceView face={front} side={turn.side} render={renderFace} />
+          </div>
         )}
-        {turn && faces.front && faces.back && c && pointOnStage && (
+        {turn && front && back && c && pointOnStage && (
           <>
             <div style={{ ...pageBox(frontLeft), clipPath: polygonCss(c.front) }} data-face="front">
-              {renderFace(faces.front, turn.side)}
+              <FaceView face={front} side={turn.side} render={renderFace} />
             </div>
             <Shading c={c} w={w} h={h} point={pointOnStage} layer="under" />
+            {c.strips.slice(0, 1).map(roll)}
+            <Shading c={c} w={w} h={h} point={pointOnStage} layer="inside" />
+            {c.strips.slice(1).map(roll)}
             <div
-              className="pointer-events-none absolute top-0 left-0"
-              style={{
-                filter: `drop-shadow(0 2px ${4 + 10 * Math.sin(Math.PI * c.progress)}px rgba(0,0,0,0.22))`,
-              }}
+              className="pointer-events-none"
+              style={placed(matrixCss(c.backMatrix), polygonCss(c.backClip))}
+              data-face="back"
             >
-              <div
-                style={{
-                  ...pageBox(0),
-                  transformOrigin: "0 0",
-                  transform: matrixCss(c.backMatrix),
-                  clipPath: polygonCss(c.backClip),
-                }}
-                data-face="back"
-              >
-                {renderFace(faces.back, turn.side === "right" ? "left" : "right")}
-              </div>
+              <FaceView face={back} side={backSide} render={renderFace} />
             </div>
-            <Shading c={c} w={w} h={h} point={pointOnStage} layer="flap" />
+            <Shading c={c} w={w} h={h} point={pointOnStage} layer="over" />
           </>
         )}
         {over}

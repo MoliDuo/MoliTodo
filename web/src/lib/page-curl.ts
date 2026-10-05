@@ -4,6 +4,15 @@
 // and the free corner C (top or bottom right) is pulled to the point P. The fold is the line halfway between C
 // and P, at right angles to C-P. The part of the page on C's side of the fold is lifted and laid over, mirrored
 // across the fold: there the back of the page shows. A left-hand page is the same picture mirrored.
+//
+// Paper does not crease, it rolls: the lifted part goes round a cylinder of radius r lying on the page before it
+// runs on flat. Seen from above, with s a point's distance past the line where the roll starts (the fold moved
+// back by a quarter turn of the cylinder, so the corner still lands on P):
+//   s <= 0           the front, lying flat;
+//   0 .. pi r / 2    the front going up the near side of the roll (mostly hidden under the rest);
+//   pi r / 2 .. pi r the back coming over the top, seen at r sin(s / r), so squeezed towards the outer edge;
+//   s >= pi r        the back, lying flat again: the same as the page mirrored across the fold.
+// The roll is drawn in a few straight slices, each squeezed by an affine map.
 
 export interface Point {
   x: number;
@@ -16,16 +25,33 @@ export type Side = "right" | "left";
 /** CSS `matrix(a, b, c, d, e, f)`: (x, y) -> (a x + c y + e, b x + d y + f). */
 export type Matrix = [number, number, number, number, number, number];
 
+/** One slice of the roll: a face of the page, clipped and squeezed into place. */
+export interface Strip {
+  face: "front" | "back";
+  /** What to show of the face, in its own coordinates; empty when the page lies too flat for a roll. */
+  clip: Point[];
+  /** From the face's own coordinates to stage coordinates. */
+  matrix: Matrix;
+  /** Where the slice lies now, in stage coordinates. */
+  area: Point[];
+}
+
 export interface Curl {
   /** The part of the front still lying flat, in the front page's own coordinates. */
   front: Point[];
-  /** The lifted part, in the back page's own coordinates (what to show of it). */
+  /** The part lying flat again past the roll, in the back page's own coordinates (what to show of it). */
   backClip: Point[];
   /** Places the back page: from its own coordinates to stage coordinates (spine at x = 0). */
   backMatrix: Matrix;
-  /** The lifted part where it lies now, in stage coordinates. */
+  /** The flat part of the back where it lies now, in stage coordinates. */
   flap: Point[];
-  /** The part of the page underneath that the lifted part uncovered, in stage coordinates. */
+  /** The roll, front slice first (it lies underneath), then the back's slices from the outer edge in. */
+  strips: Strip[];
+  /** The roll's radius; 0 when the page is folded flat. */
+  radius: number;
+  /** A point on the line where the roll starts, in stage coordinates. */
+  roll: Point;
+  /** The part of the page underneath that the lifted part uncovered (the roll included), in stage coordinates. */
   uncovered: Point[];
   /** Both ends of the fold, in stage coordinates. */
   fold: [Point, Point];
@@ -38,6 +64,23 @@ export interface Curl {
 const sub = (a: Point, b: Point): Point => ({ x: a.x - b.x, y: a.y - b.y });
 const dot = (a: Point, b: Point) => a.x * b.x + a.y * b.y;
 const length = (a: Point) => Math.hypot(a.x, a.y);
+const along = (a: Point, n: Point, k: number): Point => ({ x: a.x + n.x * k, y: a.y + n.y * k });
+const negate = (a: Point): Point => ({ x: -a.x, y: -a.y });
+
+/** How many slices the back is drawn in where it goes over the roll. */
+export const ROLL_STRIPS = 4;
+/** Slices overlap by this much on screen, so no hairline of what lies underneath shows between them. */
+const SEAM = 1.5;
+
+/**
+ * The roll's radius: none while the corner is barely lifted or almost down (the page lies nearly flat), most
+ * half way over. Never so big that the corner would still be on the roll rather than at the finger.
+ */
+export function rollRadius(distance: number, progress: number, w: number): number {
+  const most = Math.min(48, Math.max(14, w * 0.12));
+  const r = Math.min(most * Math.sin(Math.PI * progress), distance / Math.PI);
+  return r < 0.5 ? 0 : r;
+}
 
 export const cornerPoint = (corner: Corner, w: number, h: number): Point => ({
   x: w,
@@ -95,14 +138,19 @@ const intersect = (p: Point, q: Point, a: number, b: number): Point => {
   return { x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t };
 };
 
-/** Reflection across the line through `origin` with unit normal `n`, as a matrix. */
-function reflection(origin: Point, n: Point): Matrix {
-  const a = 1 - 2 * n.x * n.x;
-  const b = -2 * n.x * n.y;
-  const d = 1 - 2 * n.y * n.y;
-  const k = 2 * dot(origin, n);
-  return [a, b, b, d, k * n.x, k * n.y];
+/**
+ * Moves every point along the unit normal `n` so that its distance s past the line through `origin` becomes
+ * `shift + k s`. With k = -1 and no shift it is the reflection across that line.
+ */
+export function squash(origin: Point, n: Point, k: number, shift: number): Matrix {
+  const m = k - 1;
+  const e = shift - m * dot(origin, n);
+  return [1 + m * n.x * n.x, m * n.x * n.y, m * n.x * n.y, 1 + m * n.y * n.y, e * n.x, e * n.y];
 }
+
+/** The part of a convex polygon between `from` and `to` past the line through `origin` (unit normal `n`). */
+const slab = (polygon: Point[], origin: Point, n: Point, from: number, to: number) =>
+  clipHalfPlane(clipHalfPlane(polygon, along(origin, n, from), n), along(origin, n, to), negate(n));
 
 /** m1 after m2. */
 export function compose(m1: Matrix, m2: Matrix): Matrix {
@@ -146,10 +194,9 @@ export function curl(p: Point, corner: Corner, side: Side, w: number, h: number)
     { x: 0, y: h },
   ];
   const lifted = clipHalfPlane(page, middle, normal);
-  const flat = clipHalfPlane(page, middle, { x: -normal.x, y: -normal.y });
+  const folded = clipHalfPlane(page, middle, negate(normal));
   if (lifted.length < 3) return null;
 
-  const reflect = reflection(middle, normal);
   // The page's back seen from the front: (u, v) on the back sits behind (w - u, v) on the front.
   const flipX: Matrix = [-1, 0, 0, 1, w, 0];
   // Own coordinates of each face, from canonical: a right page's front is canonical, its back is flipped;
@@ -161,22 +208,61 @@ export function curl(p: Point, corner: Corner, side: Side, w: number, h: number)
 
   const turned = turnedPoint(corner, w, h);
   const progress = Math.min(1, Math.max(0, 1 - length(sub(point, turned)) / (2 * w)));
+  const r = rollRadius(distance, progress, w);
+  const roll = along(middle, normal, (-Math.PI * r) / 2);
+  const seam = r > 0 ? SEAM : 0;
+  const reflect = squash(middle, normal, -1, 0);
+  const flat = clipHalfPlane(page, roll, negate(normal));
+  const back = clipHalfPlane(page, along(roll, normal, Math.PI * r - seam), normal);
+
+  // The roll: the front going up (squeezed to the roll's width), then the back coming over in slices, each
+  // mapping its stretch of s straight onto the stretch of r sin(s / r) between its ends.
+  const strip = (
+    face: Strip["face"],
+    from: number,
+    to: number,
+    k: number,
+    shift: number
+  ): Strip => {
+    const own = face === "front" ? frontFromCanon : backFromCanon;
+    const squeeze = squash(roll, normal, k, shift);
+    // Each slice of the back runs on under the next one, by the same amount on screen however squeezed. The
+    // inside of the roll ends at its outer edge, where the back's first slice begins.
+    const overlap = face === "back" ? seam / Math.max(0.2, Math.abs(k)) : 0;
+    const part = r > 0 ? slab(page, roll, normal, from, to + overlap) : [];
+    return {
+      face,
+      clip: part.map(map(own)),
+      matrix: compose(stageFromCanon, compose(squeeze, own)),
+      area: part.map(map(compose(stageFromCanon, squeeze))),
+    };
+  };
+  const strips = [strip("front", 0, (Math.PI * r) / 2, 2 / Math.PI, 0)];
+  for (let i = 0; i < ROLL_STRIPS; i += 1) {
+    const a = Math.PI / 2 + (i * Math.PI) / 2 / ROLL_STRIPS;
+    const b = a + Math.PI / 2 / ROLL_STRIPS;
+    const k = (Math.sin(b) - Math.sin(a)) / (b - a);
+    strips.push(strip("back", r * a, r * b, k, r * (Math.sin(a) - k * a)));
+  }
 
   // Ends of the fold: where it crosses the page's edges (the two points shared by both parts).
   const shared = lifted.filter((q) =>
-    flat.some((f) => Math.abs(f.x - q.x) + Math.abs(f.y - q.y) < 1e-6)
+    folded.some((f) => Math.abs(f.x - q.x) + Math.abs(f.y - q.y) < 1e-6)
   );
   const ends = (shared.length >= 2 ? shared.slice(0, 2) : [middle, middle]) as [Point, Point];
 
   const stageNormal = side === "right" ? normal : { x: -normal.x, y: normal.y };
   return {
     front: flat.map(map(frontFromCanon)),
-    backClip: lifted.map(map(backFromCanon)),
+    backClip: back.map(map(backFromCanon)),
     // Back's own coordinates -> canonical front (the same flip, it is its own inverse) -> mirrored across the
     // fold -> stage.
     backMatrix: compose(stageFromCanon, compose(reflect, backFromCanon)),
-    flap: lifted.map(map(compose(stageFromCanon, reflect))),
-    uncovered: lifted.map(map(stageFromCanon)),
+    flap: back.map(map(compose(stageFromCanon, reflect))),
+    strips,
+    radius: r,
+    roll: apply(stageFromCanon, roll),
+    uncovered: clipHalfPlane(page, roll, normal).map(map(stageFromCanon)),
     fold: ends.map(map(stageFromCanon)) as [Point, Point],
     normal: stageNormal,
     progress,
@@ -194,15 +280,11 @@ export const pointsAttr = (points: Point[]): string =>
 
 const round = (value: number) => Math.round(value * 100) / 100;
 
-/** Ease-out with a slight settle, for a page finishing its turn. */
-export const easeOut = (t: number): number => 1 - (1 - t) ** 3;
-
 /**
- * Where the corner is at time t (0 to 1) of an automatic turn from `from` to `to`: along the straight line,
- * lifted into an arc so the page rises as it goes over, like a page turned by hand.
+ * Where the corner is `k` (0 to 1) of the way through an automatic turn from `from` to `to`: along the straight
+ * line, lifted into an arc so the page rises as it goes over, like a page turned by hand.
  */
-export function arcPoint(from: Point, to: Point, t: number, lift: number): Point {
-  const k = easeOut(t);
+export function arcPoint(from: Point, to: Point, k: number, lift: number): Point {
   return {
     x: from.x + (to.x - from.x) * k,
     y: from.y + (to.y - from.y) * k - Math.sin(Math.PI * k) * lift,
