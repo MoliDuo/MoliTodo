@@ -1,10 +1,11 @@
-import { CloudOff } from "lucide-react";
-import { useEffect, useMemo } from "react";
+import { CloudOff, RefreshCw } from "lucide-react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 import type { MeResponse } from "@shared/api";
 import { signInUrl } from "./api";
 import { Nav } from "./components/Nav";
 import { AppContext, type AppContextValue } from "./context";
 import { useMediaQuery, useNow } from "./hooks";
+import { applyUpdate, dropAppShell, hasUpdate, subscribeUpdate } from "./lib/app-update";
 import { getSettings } from "./lib/model";
 import { applyTheme } from "./lib/theme";
 import { dayKey } from "./lib/time";
@@ -27,10 +28,11 @@ const RELOADED_AT_KEY = "moli-todo:reloaded-for-upgrade";
 const UPGRADE_RELOAD_GAP_MS = 5 * 60 * 1000;
 
 /**
- * The server says this page is too old (426): load the current one. Inside the gap after the last automatic
- * reload, a notice asks the person to reload instead.
+ * The server says this page is too old (426): load the current one, not the copy the service worker keeps.
+ * Inside the gap after the last automatic reload, a notice asks the person to reload instead.
  */
 const reloadForUpgrade = () => {
+  const dropped = dropAppShell();
   try {
     const last = Number(window.sessionStorage.getItem(RELOADED_AT_KEY));
     if (last && Date.now() - last < UPGRADE_RELOAD_GAP_MS) return;
@@ -39,7 +41,7 @@ const reloadForUpgrade = () => {
     // No storage, so no way to stop a loop: leave it to the notice.
     return;
   }
-  window.location.reload();
+  void dropped.then(() => window.location.reload());
 };
 
 export function Shell({
@@ -80,6 +82,7 @@ export function Shell({
     [engine, store.files, me, now, today, tick]
   );
   const status = engine.getStatus();
+  const updateReady = useSyncExternalStore(subscribeUpdate, hasUpdate);
 
   return (
     <AppContext.Provider value={context}>
@@ -93,6 +96,22 @@ export function Shell({
             {status === "offline"
               ? "离线中，改动已保存在这里，联网后自动同步"
               : "版本太旧，请刷新页面"}
+          </div>
+        )}
+        {updateReady && status !== "upgrade" && (
+          <div
+            role="status"
+            className="bg-surface-2 text-muted flex items-center justify-center gap-2 px-4 py-1.5 text-xs"
+          >
+            有新版本
+            <button
+              type="button"
+              onClick={applyUpdate}
+              className="text-accent-ink inline-flex items-center gap-1 font-medium"
+            >
+              <RefreshCw size={12} aria-hidden="true" />
+              刷新
+            </button>
           </div>
         )}
         <main className="pb-24 lg:pb-8">

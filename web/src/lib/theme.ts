@@ -106,7 +106,8 @@ export function applyTheme(settings: SettingsData, systemDark: boolean, doc: Doc
   if (settings.caseColor)
     style.setProperty("--case-color", themeColors(settings.caseColor, dark).accent);
   else style.removeProperty("--case-color");
+  // index.html has one per system scheme; the chosen theme may differ from the system's, so both follow it.
   doc
-    .querySelector('meta[name="theme-color"]')
-    ?.setAttribute("content", dark ? "#141414" : "#ffffff");
+    .querySelectorAll('meta[name="theme-color"]')
+    .forEach((meta) => meta.setAttribute("content", dark ? "#141414" : "#ffffff"));
 }

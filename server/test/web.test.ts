@@ -13,6 +13,11 @@ function webDist() {
   mkdirSync(join(dir, "assets"));
   writeFileSync(join(dir, "index.html"), "<!doctype html><title>Moli Todo</title>");
   writeFileSync(join(dir, "assets", "app.js"), "console.log(1)");
+  mkdirSync(join(dir, "covers"));
+  writeFileSync(join(dir, "covers", "monet.webp"), "webp");
+  writeFileSync(join(dir, "sw.js"), "self");
+  writeFileSync(join(dir, "manifest.webmanifest"), "{}");
+  writeFileSync(join(dir, "favicon.svg"), "<svg/>");
   return dir;
 }
 
@@ -52,6 +57,30 @@ describe("pages", () => {
     ctx = await createTestApp({ WEB_DIST: webDist() });
     const res = await ctx.app.inject({ method: "GET", url: "/assets/app.js" });
     expect(res.statusCode).toBe(200);
+  });
+
+  it("lets browsers keep hashed builds for good and checks the service worker every time", async () => {
+    ctx = await createTestApp({ WEB_DIST: webDist() });
+    for (const [url, cacheControl] of [
+      ["/assets/app.js", "public, max-age=31536000, immutable"],
+      ["/covers/monet.webp", "public, max-age=604800"],
+      ["/sw.js", "no-cache"],
+      ["/manifest.webmanifest", "no-cache"],
+      ["/favicon.svg", "public, max-age=3600"],
+    ] as const) {
+      const res = await ctx.app.inject({ method: "GET", url });
+      expect(res.statusCode, url).toBe(200);
+      expect(res.headers["cache-control"], url).toBe(cacheControl);
+    }
+  });
+
+  it("hands the page to the service worker by name, signed in only", async () => {
+    ctx = await createTestApp({ WEB_DIST: webDist() });
+    const { cookie } = await ctx.signIn();
+    const res = await ctx.app.inject({ method: "GET", url: "/index.html", cookies: cookie });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain("Moli Todo");
+    expect(res.headers["cache-control"]).toBe("no-store");
   });
 
   it("answers 404 JSON for unknown files and unknown API paths", async () => {
