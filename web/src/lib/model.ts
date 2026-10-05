@@ -1,8 +1,17 @@
 // What the screens do with the records: the day lists, tags and appearance. Everything goes through the sync
 // engine, so every change shows at once and is sent in the background.
 
-import { MAX_INDENT, type Highlight, type SettingsData, type TaskData } from "@shared/records";
+import {
+  MAX_INDENT,
+  MAX_UPLOADED_COVERS,
+  type Highlight,
+  type HighlightStyle,
+  type Mark,
+  type SettingsData,
+  type TaskData,
+} from "@shared/records";
 import { parseTags, renameTag, tagKey } from "@shared/tags";
+import { fallbackChoice } from "./covers";
 import { positionAfter, positionBetween } from "./position";
 import type { SyncEngine, View } from "./sync";
 import { addDays } from "./time";
@@ -32,6 +41,12 @@ export function tasksOfDay(engine: SyncEngine, day: string): Task[] {
     .sort(byPosition);
 }
 
+/** What starts the line; lines from before notes existed are boxes. */
+export const markOf = (task: { data: Pick<TaskData, "mark"> }): Mark => task.data.mark ?? "box";
+
+/** A line with a box to tick, as opposed to a note (a dot or a dash). */
+export const isTodo = (task: { data: Pick<TaskData, "mark"> }): boolean => markOf(task) === "box";
+
 /** Every written task, by day then list order. */
 export function writtenTasks(engine: SyncEngine): Task[] {
   return engine
@@ -49,6 +64,7 @@ export const totalMinutes = (tasks: Task[]): number =>
 export interface NewTask {
   text?: string;
   indent?: number;
+  mark?: Mark;
   /** Put it right after this task; null puts it first; at the end of the day when missing. */
   after?: string | null;
 }
@@ -75,6 +91,7 @@ export function addTask(engine: SyncEngine, day: string, options: NewTask = {}):
     duration: null,
     highlight: null,
     position,
+    ...(options.mark && options.mark !== "box" ? { mark: options.mark } : {}),
   });
   return id;
 }
@@ -92,14 +109,42 @@ export function updateTask(engine: SyncEngine, id: string, patch: Partial<TaskDa
 
 export function toggleTask(engine: SyncEngine, id: string, now: number): boolean {
   const current = engine.get("task", id);
-  if (!current) return false;
+  if (!current || !isTodo(current)) return false;
   const done = !current.data.done;
   updateTask(engine, id, { done, doneAt: done ? now : null });
   return done;
 }
 
-export const setHighlight = (engine: SyncEngine, id: string, highlight: Highlight | null) =>
-  updateTask(engine, id, { highlight });
+export const setHighlight = (
+  engine: SyncEngine,
+  id: string,
+  highlight: Highlight | null,
+  style?: HighlightStyle
+) => updateTask(engine, id, { highlight, ...(style ? { highlightStyle: style } : {}) });
+
+/** Turns a line into a to-do or a note. A note is never done and has no time spent. */
+export function setMark(engine: SyncEngine, id: string, mark: Mark): void {
+  updateTask(
+    engine,
+    id,
+    mark === "box" ? { mark } : { mark, done: false, doneAt: null, duration: null }
+  );
+}
+
+export const imagesOf = (task: { data: Pick<TaskData, "images"> }): string[] =>
+  task.data.images ?? [];
+
+export function addImages(engine: SyncEngine, id: string, files: string[]): void {
+  const task = engine.get("task", id);
+  if (!task) return;
+  updateTask(engine, id, { images: [...imagesOf(task), ...files] });
+}
+
+export function removeImage(engine: SyncEngine, id: string, file: string): void {
+  const task = engine.get("task", id);
+  if (!task) return;
+  updateTask(engine, id, { images: imagesOf(task).filter((f) => f !== file) });
+}
 
 export const deleteTask = (engine: SyncEngine, id: string) => engine.remove("task", id);
 
@@ -131,7 +176,9 @@ export function moveTasksToDay(engine: SyncEngine, ids: string[], day: string): 
 
 /** Yesterday's written tasks that were not finished: the ones offered to move to today. */
 export const leftFromYesterday = (engine: SyncEngine, today: string): Task[] =>
-  tasksOfDay(engine, addDays(today, -1)).filter((task) => isWritten(task) && !task.data.done);
+  tasksOfDay(engine, addDays(today, -1)).filter(
+    (task) => isWritten(task) && isTodo(task) && !task.data.done
+  );
 
 // Tags -------------------------------------------------------------------------------------------------------
 
@@ -250,6 +297,7 @@ export function groupByDay(tasks: Task[]): { day: string; tasks: Task[] }[] {
 // Appearance -------------------------------------------------------------------------------------------------
 
 export const SETTINGS_ID = "settings";
+/** The first uploaded cover's id, from when there could be only one. */
 export const COVER_ID = "cover";
 export const DEFAULT_SETTINGS: SettingsData = { accent: null, theme: "system", cover: "monet" };
 
@@ -262,10 +310,53 @@ export function saveSettings(engine: SyncEngine, patch: Partial<SettingsData>): 
   engine.put("settings", SETTINGS_ID, { ...getSettings(engine), ...patch });
 }
 
-export const uploadedCover = (engine: SyncEngine): string | null =>
-  engine.get("cover", COVER_ID)?.data.image ?? null;
-
-export function saveUploadedCover(engine: SyncEngine, image: string): void {
-  engine.put("cover", COVER_ID, { image });
-  saveSettings(engine, { cover: "upload" });
+export interface UploadedCover {
+  /** The `cover` record's id. */
+  id: string;
+  /** What `settings.cover` says when it is chosen. */
+  choice: string;
+  image: string;
 }
+
+/** The settings value that chooses an uploaded cover. */
+export const uploadChoice = (id: string): string => (id === COVER_ID ? "upload" : `u:${id}`);
+
+/** Her uploaded covers, oldest first. */
+export function uploadedCovers(engine: SyncEngine): UploadedCover[] {
+  return engine
+    .all("cover")
+    .map((record) => ({ id: record.id, choice: uploadChoice(record.id), image: record.data.image }))
+    .sort((a, b) =>
+      a.id === COVER_ID ? -1 : b.id === COVER_ID ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+    );
+}
+
+/** True when another cover can be uploaded. */
+export const canUploadCover = (engine: SyncEngine): boolean =>
+  uploadedCovers(engine).length < MAX_UPLOADED_COVERS;
+
+/** Keeps a new uploaded cover and chooses it. Ids sort by time so the list keeps upload order. */
+export function saveUploadedCover(engine: SyncEngine, image: string, now = Date.now()): string {
+  const id = `${now.toString(36).padStart(9, "0")}-${newId().slice(0, 8)}`;
+  engine.put("cover", id, { image });
+  saveSettings(engine, { cover: uploadChoice(id) });
+  return id;
+}
+
+/** Takes a cover off the list: a painting is hidden, an upload is deleted. If it was chosen, the next one is. */
+export function removeCover(engine: SyncEngine, choice: string): void {
+  const settings = getSettings(engine);
+  const uploads = uploadedCovers(engine);
+  const upload = uploads.find((u) => u.choice === choice);
+  const hidden = settings.hiddenCovers ?? [];
+  const nextHidden = upload || hidden.includes(choice) ? hidden : [...hidden, choice];
+  if (upload) engine.remove("cover", upload.id);
+  const patch: Partial<SettingsData> = {};
+  if (nextHidden !== hidden) patch.hiddenCovers = nextHidden;
+  if (settings.cover === choice) patch.cover = fallbackChoice(choice, uploads, nextHidden);
+  if (Object.keys(patch).length > 0) saveSettings(engine, patch);
+}
+
+/** Brings back every painting she removed. */
+export const restoreCovers = (engine: SyncEngine): void =>
+  saveSettings(engine, { hiddenCovers: [] });

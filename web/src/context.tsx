@@ -1,9 +1,11 @@
 import { createContext, useContext } from "react";
 import type { MeResponse } from "@shared/api";
+import type { FileApi } from "./lib/images";
 import type { SyncEngine } from "./lib/sync";
 
 export interface AppContextValue {
   engine: SyncEngine;
+  files: FileApi;
   me: MeResponse;
   /** Now, refreshed every few seconds so "today" turns over at midnight. */
   now: number;

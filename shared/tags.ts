@@ -55,3 +55,18 @@ export function isValidTagName(name: string): boolean {
   const parts = splitTags(`#${name}`);
   return name.length > 0 && name.length <= 50 && parts.length === 1 && parts[0]?.tag === name;
 }
+
+const TAG_BEFORE_CARET = /#([^\s#.,;:!?，。、；：！？（）()[\]【】{}"'“”‘’<>《》]*)$/u;
+
+/** The tag being typed where the caret is: where its "#" starts and what is written after it so far. */
+export function tagBeforeCaret(
+  text: string,
+  caret: number
+): { start: number; query: string } | null {
+  const match = TAG_BEFORE_CARET.exec(text.slice(0, caret));
+  if (!match) return null;
+  // Only while the caret is at the end of the tag, not in the middle of one.
+  const after = text.slice(caret, caret + 1);
+  if (after && !/[\s#.,;:!?，。、；：！？（）()[\]【】{}"'“”‘’<>《》]/u.test(after)) return null;
+  return { start: match.index, query: match[1] ?? "" };
+}

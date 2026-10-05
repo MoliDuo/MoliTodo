@@ -1,5 +1,13 @@
-import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  act,
+  cleanup,
+  createEvent,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskData } from "@shared/records";
 import { tasksOfDay } from "../lib/model";
 import type { SyncEngine } from "../lib/sync";
@@ -15,6 +23,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   window.localStorage.clear();
 });
 
@@ -34,6 +43,7 @@ const dataOf = (engine: SyncEngine, id: string): TaskData => {
 };
 const rowOf = (area: HTMLElement) => area.closest("li") as HTMLLIElement;
 const footer = () => document.querySelector("footer")?.textContent ?? "";
+const toolbar = () => screen.getByRole("toolbar", { name: "编辑这一行" });
 const wait = (ms: number) => act(() => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
 /** Focuses a line, puts the caret at `start`..`end`, and presses a key. */
@@ -465,16 +475,28 @@ describe("TodayPage editing a line", () => {
     expect(lines()).toHaveLength(2);
   });
 
-  it("focuses the text when the space beside it is clicked", async () => {
+  it("edits a line tapped on its words or beside them, but not on its box", async () => {
     const api = createFakeApi();
     seedTask(api, TODAY, "点我");
     await renderApp({ api });
+    // Until it is edited, the text box lets taps through to the row.
+    expect(line(0).className).toContain("pointer-events-none");
     const box = line(0).parentElement?.parentElement as HTMLElement;
     fireEvent.click(box);
     expect(document.activeElement).toBe(line(0));
+    expect(line(0).className).not.toContain("pointer-events-none");
     act(() => line(0).blur());
     fireEvent.click(line(0).parentElement as HTMLElement);
+    expect(document.activeElement).toBe(line(0));
+    act(() => line(0).blur());
+    fireEvent.click(screen.getByRole("button", { name: "标为完成" }));
     expect(document.activeElement).not.toBe(line(0));
+  });
+
+  it("has no hint in the new line", async () => {
+    await renderApp();
+    expect(newLine().getAttribute("placeholder")).toBeNull();
+    expect(screen.queryByText(/两个空格缩进/)).toBeNull();
   });
 
   it("shows tags in their colour", async () => {
@@ -573,36 +595,23 @@ describe("TodayPage ticking and time spent", () => {
 });
 
 describe("TodayPage task menu", () => {
-  const openMenu = (index = 0) => {
-    fireEvent.mouseDown(screen.getAllByRole("button", { name: "更多" })[index] as HTMLElement);
-    fireEvent.click(screen.getAllByRole("button", { name: "更多" })[index] as HTMLElement);
-  };
+  /** Right click on a row, as on a computer. */
+  const openMenu = (index = 0) => fireEvent.contextMenu(rowOf(line(index)));
 
-  it("sets and clears the highlight", async () => {
+  it("has no highlight in the menu (it is on the toolbar), and opens from the toolbar's ⋯", async () => {
     const api = createFakeApi();
-    const id = seedTask(api, TODAY, "重点");
-    const { engine, store } = await renderApp({ api });
+    seedTask(api, TODAY, "重点");
+    await renderApp({ api });
     openMenu();
     const sheet = screen.getByRole("dialog", { name: "重点" });
-    expect(within(sheet).getByRole("button", { name: "不高亮" }).getAttribute("aria-pressed")).toBe(
-      "true"
-    );
-    for (const name of ["黄色", "红色", "蓝色", "绿色", "紫色"]) {
-      expect(within(sheet).getByRole("button", { name })).toBeTruthy();
-    }
-    fireEvent.click(within(sheet).getByRole("button", { name: "黄色" }));
-    expect(dataOf(engine, id).highlight).toBe("yellow");
-    expect(within(sheet).getByRole("button", { name: "黄色" }).getAttribute("aria-pressed")).toBe(
-      "true"
-    );
-    expect(list().querySelector(".hl-yellow")).not.toBeNull();
-    await synced(store);
-    expect(api.data("task", id)).toMatchObject({ highlight: "yellow" });
-
-    fireEvent.click(within(sheet).getByRole("button", { name: "不高亮" }));
-    expect(dataOf(engine, id).highlight).toBeNull();
+    expect(within(sheet).queryByRole("button", { name: "黄色" })).toBeNull();
+    expect(within(sheet).queryByRole("button", { name: "上移" })).toBeNull();
     fireEvent.click(within(sheet).getByRole("button", { name: "关闭" }));
     expect(screen.queryByRole("dialog")).toBeNull();
+
+    act(() => line(0).focus());
+    fireEvent.click(within(toolbar()).getByRole("button", { name: "更多" }));
+    expect(screen.getByRole("dialog", { name: "重点" })).toBeTruthy();
   });
 
   it("saves, clears and checks the time spent", async () => {
@@ -681,24 +690,53 @@ describe("TodayPage task menu", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("moves a line up and down", async () => {
+  it("drags a line to another place after a long press", async () => {
     const api = createFakeApi();
     seedTask(api, TODAY, "一");
     seedTask(api, TODAY, "二");
-    seedTask(api, TODAY, "三");
-    const { engine } = await renderApp({ api });
+    const id = seedTask(api, TODAY, "三");
+    const { engine, store } = await renderApp({ api });
+    // Rows 30px tall, one under another.
+    const rows = [...list().querySelectorAll<HTMLElement>("li[data-task-id]")];
+    rows.forEach((row, i) => {
+      row.getBoundingClientRect = () =>
+        ({
+          top: i * 30,
+          height: 30,
+          bottom: i * 30 + 30,
+          left: 0,
+          right: 300,
+          width: 300,
+        }) as DOMRect;
+    });
+    const row = rowOf(line(2));
+    fireEvent.pointerDown(row, { button: 0, clientX: 50, clientY: 75 });
+    await wait(500);
+    expect(row.className).toContain("shadow-lg");
+    fireEvent.pointerMove(row, { clientX: 50, clientY: 10 });
+    // The others slide down to make room above them.
+    expect(rowOf(line(0)).style.transform).toBe("translateY(30px)");
+    fireEvent.pointerUp(row);
+    fireEvent.click(row);
+    expect(texts(engine)).toEqual(["三", "一", "二"]);
+    // The click that ends the drag does not start editing.
+    expect(document.activeElement?.tagName).not.toBe("TEXTAREA");
+    await synced(store);
+    expect(tasksOfDay(engine, TODAY)[0]?.id).toBe(id);
+  });
 
-    openMenu(0);
-    expect((screen.getByRole("button", { name: "上移" }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "下移" }));
-    expect(texts(engine)).toEqual(["二", "一", "三"]);
-    fireEvent.click(screen.getByRole("button", { name: "下移" }));
-    expect(texts(engine)).toEqual(["二", "三", "一"]);
-    expect((screen.getByRole("button", { name: "下移" }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "上移" }));
-    expect(texts(engine)).toEqual(["二", "一", "三"]);
-    fireEvent.click(screen.getByRole("button", { name: "上移" }));
-    expect(texts(engine)).toEqual(["一", "二", "三"]);
+  it("does not drag on a short press, or one that moves first (a scroll)", async () => {
+    const api = createFakeApi();
+    seedTask(api, TODAY, "一");
+    seedTask(api, TODAY, "二");
+    const { engine } = await renderApp({ api });
+    const row = rowOf(line(1));
+    fireEvent.pointerDown(row, { button: 0, clientX: 50, clientY: 45 });
+    fireEvent.pointerMove(row, { clientX: 50, clientY: 5 });
+    await wait(500);
+    fireEvent.pointerUp(row);
+    expect(row.className).not.toContain("shadow-lg");
+    expect(texts(engine)).toEqual(["一", "二"]);
   });
 
   it("deletes a line", async () => {
@@ -713,12 +751,14 @@ describe("TodayPage task menu", () => {
     expect(api.data("task", id)).toBeNull();
   });
 
-  it("opens on right click, but not on the text itself", async () => {
+  it("opens on right click, but not on text being edited", async () => {
     const api = createFakeApi();
     const id = seedTask(api, TODAY, "右键");
     const { engine } = await renderApp({ api });
+    act(() => line(0).focus());
     fireEvent.contextMenu(line(0));
     expect(screen.queryByRole("dialog")).toBeNull();
+    act(() => line(0).blur());
     fireEvent.contextMenu(rowOf(line(0)));
     expect(screen.getByRole("dialog", { name: "右键" })).toBeTruthy();
     fireEvent.keyDown(window, { key: "Escape" });
@@ -727,26 +767,23 @@ describe("TodayPage task menu", () => {
     const box = screen.getByRole("button", { name: "标为完成" });
     fireEvent.contextMenu(box);
     expect(screen.getByRole("dialog", { name: "右键" })).toBeTruthy();
-    // The click that follows a right click does not tick the line.
-    fireEvent.click(box);
+    // A right click on the box opens the menu and does not tick the line.
     expect(dataOf(engine, id).done).toBe(false);
   });
 
-  it("opens on a long press without ticking", async () => {
+  it("lifts the line on a long press on its box, without ticking or opening the menu", async () => {
     const api = createFakeApi();
     const id = seedTask(api, TODAY, "长按");
     const { engine } = await renderApp({ api });
     const box = screen.getByRole("button", { name: "标为完成" });
-    fireEvent.pointerDown(box, { clientX: 10, clientY: 10 });
+    fireEvent.pointerDown(box, { button: 0, clientX: 10, clientY: 10 });
     fireEvent.pointerMove(box, { clientX: 12, clientY: 11 });
     await wait(550);
+    expect(rowOf(line(0)).className).toContain("shadow-lg");
     fireEvent.pointerUp(box);
     fireEvent.click(box);
-    expect(screen.getByRole("dialog", { name: "长按" })).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(dataOf(engine, id).done).toBe(false);
-    // A second right click while the press counts as fired does not open it twice.
-    fireEvent.contextMenu(box);
-    expect(screen.getAllByRole("dialog")).toHaveLength(1);
   });
 
   it("treats a press that moves or is cancelled as a tap", async () => {
@@ -766,6 +803,252 @@ describe("TodayPage task menu", () => {
     fireEvent.pointerCancel(undo);
     await wait(550);
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+describe("TodayPage toolbar", () => {
+  const tool = (name: string) => within(toolbar()).getByRole("button", { name });
+  const picture = (name = "a.png") => new File(["png"], name, { type: "image/png" });
+  const pick = (files: File[]) =>
+    fireEvent.change(screen.getByLabelText("添加图片"), { target: { files } });
+
+  it("shows while a line is edited and goes when it is left", async () => {
+    const api = createFakeApi();
+    seedTask(api, TODAY, "一行");
+    await renderApp({ api });
+    expect(screen.queryByRole("toolbar")).toBeNull();
+    act(() => line(0).focus());
+    expect(toolbar()).toBeTruthy();
+    expect(tool("待办").getAttribute("aria-pressed")).toBe("true");
+    // Pressing a tool does not take the caret out of the line.
+    const down = createEvent.pointerDown(tool("缩进"));
+    fireEvent(tool("缩进"), down);
+    expect(down.defaultPrevented).toBe(true);
+    act(() => line(0).blur());
+    expect(screen.queryByRole("toolbar")).toBeNull();
+  });
+
+  it("turns a line into a dot or dash note and back", async () => {
+    const api = createFakeApi();
+    const id = seedTask(api, TODAY, "想法", { done: true, duration: 20 });
+    const { engine, store } = await renderApp({ api });
+    act(() => line(0).focus());
+    fireEvent.click(tool("圆点"));
+    expect(dataOf(engine, id)).toMatchObject({ mark: "dot", done: false, duration: null });
+    expect(tool("圆点").getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("img", { name: "圆点" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /标为/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /用时/ })).toBeNull();
+    fireEvent.click(tool("横线"));
+    expect(screen.getByRole("img", { name: "横线" })).toBeTruthy();
+    fireEvent.click(tool("待办"));
+    expect(screen.getByRole("button", { name: "标为完成" })).toBeTruthy();
+    await synced(store);
+    expect(api.data("task", id)).toMatchObject({ mark: "box" });
+  });
+
+  it("gives the new line a kind and an indent before anything is typed", async () => {
+    const { engine } = await renderApp();
+    act(() => newLine().focus());
+    expect((tool("退格") as HTMLButtonElement).disabled).toBe(true);
+    expect((tool("高亮") as HTMLButtonElement).disabled).toBe(true);
+    expect((tool("图片") as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(tool("横线"));
+    fireEvent.click(tool("缩进"));
+    fireEvent.click(tool("缩进"));
+    fireEvent.click(tool("退格"));
+    type(newLine(), "一条随手记");
+    press(newLine(), "Enter");
+    const [task] = tasksOfDay(engine, TODAY);
+    expect(task?.data).toMatchObject({ text: "一条随手记", mark: "dash", indent: 1 });
+    // The next line keeps going the same way.
+    act(() => newLine().focus());
+    expect(tool("横线").getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("indents and outdents a line", async () => {
+    const api = createFakeApi();
+    const id = seedTask(api, TODAY, "缩进我");
+    const { engine } = await renderApp({ api });
+    act(() => line(0).focus());
+    fireEvent.click(tool("缩进"));
+    fireEvent.click(tool("缩进"));
+    expect(dataOf(engine, id).indent).toBe(2);
+    fireEvent.click(tool("退格"));
+    expect(dataOf(engine, id).indent).toBe(1);
+    expect(document.activeElement).toBe(line(0));
+  });
+
+  it("highlights with a fill or a coloured underline", async () => {
+    const api = createFakeApi();
+    const id = seedTask(api, TODAY, "重点");
+    const { engine, store } = await renderApp({ api });
+    act(() => line(0).focus());
+    fireEvent.click(tool("高亮"));
+    const colours = screen.getByRole("group", { name: "高亮颜色" });
+    expect(
+      within(colours).getByRole("button", { name: "不高亮" }).getAttribute("aria-pressed")
+    ).toBe("true");
+    fireEvent.click(within(colours).getByRole("button", { name: "黄色" }));
+    expect(dataOf(engine, id)).toMatchObject({ highlight: "yellow" });
+    expect(list().querySelector(".hl-yellow")).not.toBeNull();
+    fireEvent.click(within(colours).getByRole("button", { name: "下划线" }));
+    expect(dataOf(engine, id)).toMatchObject({ highlight: "yellow", highlightStyle: "underline" });
+    expect(list().querySelector(".hl-u.hl-yellow")).not.toBeNull();
+    fireEvent.click(within(colours).getByRole("button", { name: "蓝色" }));
+    expect(dataOf(engine, id)).toMatchObject({ highlight: "blue", highlightStyle: "underline" });
+    await synced(store);
+    expect(api.data("task", id)).toMatchObject({ highlight: "blue", highlightStyle: "underline" });
+    fireEvent.click(within(colours).getByRole("button", { name: "不高亮" }));
+    expect(dataOf(engine, id).highlight).toBeNull();
+  });
+
+  it("highlights what is typed on the new line by making it a line first", async () => {
+    const { engine } = await renderApp();
+    type(newLine(), "刚写的");
+    fireEvent.click(tool("高亮"));
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "高亮颜色" })).getByRole("button", { name: "红色" })
+    );
+    const [task] = tasksOfDay(engine, TODAY);
+    expect(task?.data).toMatchObject({ text: "刚写的", highlight: "red" });
+  });
+
+  it("puts a # at the caret and offers the tags she has", async () => {
+    const api = createFakeApi();
+    seedTask(api, YESTERDAY, "R 21-1-3 #阅读");
+    seedTask(api, YESTERDAY, "思路 #大作文");
+    const id = seedTask(api, TODAY, "复盘");
+    const { engine } = await renderApp({ api, hash: "#/" });
+    press(line(0), "End");
+    fireEvent.click(tool("标签"));
+    expect(line(0).value).toBe("复盘#");
+    const tags = screen.getByLabelText("标签", { selector: "div" });
+    expect(
+      within(tags)
+        .getAllByRole("button")
+        .map((b) => b.textContent)
+        .sort()
+    ).toEqual(["#大作文", "#阅读"].sort());
+    fireEvent.change(line(0), { target: { value: "复盘#阅", selectionStart: 4 } });
+    act(() => line(0).setSelectionRange(4, 4));
+    fireEvent.select(line(0));
+    fireEvent.click(
+      within(screen.getByLabelText("标签", { selector: "div" })).getByRole("button", {
+        name: "#阅读",
+      })
+    );
+    expect(line(0).value).toBe("复盘#阅读 ");
+    act(() => line(0).blur());
+    expect(dataOf(engine, id).text).toBe("复盘#阅读 ");
+  });
+
+  it("adds pictures to a line, shows them, and deletes one", async () => {
+    const api = createFakeApi();
+    const id = seedTask(api, TODAY, "看图");
+    const { engine, store } = await renderApp({ api });
+    act(() => line(0).focus());
+    const click = vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(() => {});
+    fireEvent.click(tool("图片"));
+    expect(click).toHaveBeenCalledTimes(1);
+    pick([picture("a.png"), picture("b.png")]);
+    await waitFor(() => expect(dataOf(engine, id).images).toHaveLength(2));
+    expect(api.files.size).toBe(2);
+    const [first, second] = dataOf(engine, id).images ?? [];
+    const thumb = screen.getByRole("button", { name: "看第 2 张图片" });
+    expect(thumb.querySelector("img")?.getAttribute("src")).toBe(`/api/v2/files/${second}`);
+
+    fireEvent.click(thumb);
+    const viewer = screen.getByRole("dialog", { name: "图片" });
+    expect(within(viewer).getByText("2 / 2")).toBeTruthy();
+    fireEvent.click(within(viewer).getByRole("button", { name: "上一张" }));
+    expect(within(viewer).getByText("1 / 2")).toBeTruthy();
+    fireEvent.click(within(viewer).getByRole("button", { name: /删除图片/ }));
+    fireEvent.click(within(viewer).getByRole("button", { name: "删除这张" }));
+    expect(dataOf(engine, id).images).toEqual([second]);
+    await waitFor(() => expect(api.files.has(first as string)).toBe(false));
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await synced(store);
+    expect(api.data("task", id)).toMatchObject({ images: [second] });
+
+    // A line with a picture stays when its words are cleared.
+    type(line(0), "");
+    act(() => line(0).blur());
+    expect(engine.get("task", id)).not.toBeNull();
+  });
+
+  it("says so when the pictures cannot go up", async () => {
+    const api = createFakeApi();
+    const id = seedTask(api, TODAY, "没网");
+    const { engine } = await renderApp({ api });
+    act(() => line(0).focus());
+    vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(() => {});
+    fireEvent.click(tool("图片"));
+    api.fail = "network";
+    pick([picture()]);
+    expect(await screen.findByText("没联网，图片传不上去")).toBeTruthy();
+    expect(dataOf(engine, id).images ?? []).toEqual([]);
+    api.fail = null;
+    pick([new File(["gif"], "a.gif", { type: "image/gif" })]);
+    expect(await screen.findByText("这张图片用不了，换一张试试")).toBeTruthy();
+  });
+
+  it("adds pictures to what is typed on the new line, up to nine a line", async () => {
+    const { engine } = await renderApp();
+    type(newLine(), "九张图");
+    vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(() => {});
+    fireEvent.click(tool("图片"));
+    const [task] = tasksOfDay(engine, TODAY);
+    expect(task?.data.text).toBe("九张图");
+    pick(Array.from({ length: 10 }, (_, i) => picture(`${i}.png`)));
+    expect(screen.getByText("一行最多放 9 张图片")).toBeTruthy();
+    expect(screen.getAllByRole("status", { name: "图片上传中" }).length).toBeGreaterThan(0);
+    await waitFor(() => expect(dataOf(engine, task?.id as string).images).toHaveLength(9));
+    expect(screen.queryByRole("status", { name: "图片上传中" })).toBeNull();
+  });
+
+  it("says when the server would not keep a picture, and the notice goes after a while", async () => {
+    const api = createFakeApi();
+    seedTask(api, TODAY, "坏了");
+    await renderApp({ api });
+    act(() => line(0).focus());
+    vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(() => {});
+    fireEvent.click(tool("图片"));
+    api.fail = 500;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      pick([picture()]);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(screen.getByText("图片没传上去，再试一次")).toBeTruthy();
+      act(() => vi.advanceTimersByTime(3500));
+      expect(screen.queryByText("图片没传上去，再试一次")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("puts the caret where the line was tapped", async () => {
+    const api = createFakeApi();
+    seedTask(api, TODAY, "复盘#阅读");
+    await renderApp({ api });
+    const copy = line(0).previousElementSibling as HTMLElement;
+    const words = copy.querySelector("span") ?? copy;
+    const first =
+      [...words.childNodes].find((n) => n.nodeType === Node.TEXT_NODE) ?? words.firstChild;
+    const doc = document as unknown as Record<string, unknown>;
+    doc.caretPositionFromPoint = () => ({ offsetNode: first, offset: 1 });
+    try {
+      fireEvent.click(rowOf(line(0)), { clientX: 30, clientY: 10 });
+      expect(document.activeElement).toBe(line(0));
+      expect(line(0).selectionStart).toBe(1);
+    } finally {
+      delete doc.caretPositionFromPoint;
+    }
   });
 });
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasTag, isValidTagName, parseTags, renameTag, splitTags } from "./tags";
+import { hasTag, isValidTagName, parseTags, renameTag, splitTags, tagBeforeCaret } from "./tags";
 
 describe("tags", () => {
   it("finds tags written right after the text, in Chinese or English", () => {
@@ -41,5 +41,20 @@ describe("tags", () => {
     expect(isValidTagName("a b")).toBe(false);
     expect(isValidTagName("a#b")).toBe(false);
     expect(isValidTagName("x".repeat(51))).toBe(false);
+  });
+});
+
+describe("tagBeforeCaret", () => {
+  it("finds the tag being typed at the caret", () => {
+    expect(tagBeforeCaret("写作#", 3)).toEqual({ start: 2, query: "" });
+    expect(tagBeforeCaret("写作 #大作", 6)).toEqual({ start: 3, query: "大作" });
+    expect(tagBeforeCaret("#a #b", 5)).toEqual({ start: 3, query: "b" });
+  });
+
+  it("is null away from a tag or in the middle of one", () => {
+    expect(tagBeforeCaret("写作", 2)).toBeNull();
+    expect(tagBeforeCaret("#阅读 好", 5)).toBeNull();
+    expect(tagBeforeCaret("#阅读", 2)).toBeNull();
+    expect(tagBeforeCaret("#阅读 x", 3)).toEqual({ start: 0, query: "阅读" });
   });
 });
