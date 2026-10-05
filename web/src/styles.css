@@ -4,7 +4,10 @@
 
 /* "inline": these refer to colours set on <body> by the theme, so they must be worked out where used. */
 @theme inline {
-  --font-serif: Georgia, "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", serif;
+  /* No Georgia: its digits rise and drop (old-style figures), so "3h34min" looks uneven. */
+  --font-serif:
+    "Noto Serif", "Noto Serif SC", "Source Han Serif SC", Cambria, "Times New Roman", "Songti SC",
+    "STSong", serif;
   --color-accent-ink: var(--accent-ink, var(--moli-accent));
   --color-accent-soft: color-mix(in srgb, var(--moli-accent) 16%, transparent);
   --color-paper: var(--paper);
